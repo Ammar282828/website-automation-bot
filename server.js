@@ -405,6 +405,70 @@ function buildZip(entries) {
     return Buffer.concat([...localHeaders, centralBuf, eocd]);
 }
 
+// ── Nano Banana v3 — shoulder/basket crops ──────────────────────────────────
+async function generateShoulderCrops(imageInputs) {
+    const originals = imageInputs.filter(img => img.mimeType === 'image/jpeg');
+    const crops = [];
+    for (const img of originals) {
+        try {
+            const buf = Buffer.from(img.base64, 'base64');
+            const { width, height } = await sharp(buf).metadata();
+
+            // Crop 1 — shoulder zone: bottom 60% of image (band + junction area)
+            const shoulderBuf = await sharp(buf)
+                .extract({
+                    left: Math.floor(width * 0.1),
+                    top:  Math.floor(height * 0.4),
+                    width:  Math.floor(width * 0.8),
+                    height: Math.floor(height * 0.6),
+                })
+                .jpeg({ quality: 95 })
+                .toBuffer();
+            crops.push({ base64: shoulderBuf.toString('base64'), mimeType: 'image/jpeg' });
+
+            // Crop 2 — basket zone: top 55% of image (setting + basket walls)
+            const basketBuf = await sharp(buf)
+                .extract({
+                    left: Math.floor(width * 0.15),
+                    top:  Math.floor(height * 0.05),
+                    width:  Math.floor(width * 0.7),
+                    height: Math.floor(height * 0.55),
+                })
+                .jpeg({ quality: 95 })
+                .toBuffer();
+            crops.push({ base64: basketBuf.toString('base64'), mimeType: 'image/jpeg' });
+        } catch (err) {
+            console.warn('[Crop] Failed for one image, skipping:', err.message);
+        }
+    }
+    return crops;
+}
+
+// ── Nano Banana v3 — geometry note via Gemini text ──────────────────────────
+async function generateGeometryNote(originals, crops) {
+    const allRefs = [...originals, ...crops];
+    const parts = [
+        ...allRefs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+        { text: `You are a jewelry technical analyst. Study these reference photos (full ring views and zoomed close-ups) and write 2–4 plain English sentences describing:
+
+1. SHOULDER: Where the shank meets the basket — does it taper smoothly? Step abruptly? Flare outward? Curve inward? Visible ledge, undercut, or decorative sweep? Symmetrical?
+2. BASKET: Wall shape — straight vertical, tapered cone, tulip, cathedral arch? Cut-outs, windows, or solid walls? Height relative to stone?
+3. GALLERY (if visible): Any scrollwork, milgrain, open or closed gallery visible through the side?
+
+Write 2–4 plain sentences. Be specific about shapes, angles, and structures. Example: "The shank rises into two curved cathedral arches that sweep upward into the basket base on both sides. The basket is a four-prong setting with thin pointed claw prongs and open walls between the prongs." Respond with ONLY the description sentences, nothing else.` },
+    ];
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ parts }],
+        });
+        return response.candidates?.[0]?.content?.parts?.find(p => p.text)?.text?.trim() || null;
+    } catch (err) {
+        console.warn('[GeometryNote] Failed, skipping:', err.message);
+        return null;
+    }
+}
+
 // ── Ecommerce shot ──────────────────────────────────────────────────────────
 async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0], hasFrontRef = null) {
     const isDetail   = angle.id === 'detail';
@@ -494,39 +558,66 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- No fill lights, no rim lights \u2014 one source only',
     ];
 
-    const prompt = isBand ? [
-        `You have ${numOriginalRefs} original reference photo(s) of a jewelry piece${hasFrontRef ? ', plus one approved rendered front view (the last image). The original reference photo(s) are the primary authority for every physical detail. The rendered front view is a secondary consistency check for stone layout, metal color, and finish.' : '. The original reference photo(s) are the primary authority for every physical detail.'}`,
-        '',
-        contextNote,
-        '',
-        'TASK: Generate a professional luxury product photograph of this EXACT jewelry piece for a high-end e-commerce listing. Extract the piece from its current background and place it in a controlled studio environment.',
-        '',
-        'SUBJECT — ABSOLUTE FIDELITY TO REFERENCE:',
-        'Study every physical detail in the reference image(s) and reproduce them with zero deviation. This means:',
-        '- Count the exact number of prongs and match that count precisely. Cross-check by studying the basket structure — prongs connect to the basket, confirming their count and arrangement.',
-        '- Reproduce the basket exactly: height, wall thickness, side profile, any cut-outs, milgrain, or architectural details.',
-        '- Reproduce the shoulder junction (where the shank meets the base of the basket) exactly as it appears in the reference — its curve, angle, any step, undercut, or decorative sweep. Study both shoulders across all reference images.',
-        '- Reproduce the band profile exactly: width, thickness, taper, shank shape (flat, rounded, knife-edge), and any surface details (milgrain, channel stones, engravings).',
-        '- Preserve the exact metal color, texture, gemstone shape, cut, color, and setting type.',
-        '- If any detail is not clearly visible in the reference, leave it hidden or show only what the reference supports. Stay conservative with ambiguous areas — preserve the visible silhouette rather than guessing.',
-        '',
-        'SCENE — SIDE PROFILE VIEW:',
-        'The ring stands upright on its shank. The camera looks at the left (outer-left) edge of the band, capturing the side profile of both the band and the basket.',
-        '- Camera height: table-surface level, 0–5 degrees elevation, looking horizontally at the side of the ring.',
-        '- The band and lower basket fill the frame. The stone appears at the top, partially visible, but is secondary to the band and setting structure.',
-        '- Only the exterior side wall of the basket is visible from this angle.',
-        '- Clean white (#FFFFFF) surface with a soft, natural micro-shadow beneath the piece.',
-        '- Square 1:1 frame. The piece occupies roughly 65% of the frame, centered, with equal breathing room on all sides. Fill empty areas with white.',
-        '',
-        'LIGHTING:',
-        'Single overhead softbox producing bright but natural light. Clean specular highlights that reveal exact material properties — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle, realistic shadow and reflection beneath the piece. Professional DSLR macro lens quality: extremely sharp focus across the entire piece, high resolution, luxury commercial photography.',
-        '',
-        'CONSTRAINTS:',
-        '- Reproduce only what exists in the reference. Add nothing: no extra stones, no split shanks, no decorative elements, no design improvements.',
-        '- Remove nothing: preserve every element from the reference without simplifying or merging.',
-        '- Do not default to generic ring archetypes (cathedral shoulder, donut gallery, peg-head, tulip basket, cone basket, smooth solitaire taper) unless the reference explicitly shows that structure.',
-        ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
-    ].join('\n') : [
+    // ── Nano Banana v3 band shot ─────────────────────────────────────────────
+    let bandParts = null;
+    if (isBand) {
+        const originals  = promptInputs.filter(img => img.mimeType === 'image/jpeg');
+        const frontRef   = hasFrontRef ? [promptInputs[promptInputs.length - 1]] : [];
+        const crops      = await generateShoulderCrops(originals);
+        const geometryNote = await generateGeometryNote(originals, crops);
+        const numCroppedRefs = crops.length;
+
+        // Image order: originals → crops → front ref (last)
+        const orderedImages = [...originals, ...crops, ...frontRef];
+
+        const bandPrompt = [
+            `You have ${originals.length} original reference photo(s) of a jewelry piece, ${numCroppedRefs} cropped close-up(s) of the shoulder junction and basket, and${hasFrontRef ? ' one approved rendered front view (the last image).' : ' no rendered front view.'}`,
+            '',
+            'The original references are the primary authority for every physical detail. The cropped close-ups isolate the most critical structural areas. The rendered front view is a secondary consistency check for stone layout, metal color, and finish.',
+            '',
+            contextNote,
+            '',
+            'TASK: Generate a professional luxury product photograph of this EXACT jewelry piece for a high-end e-commerce listing. Extract the piece from its current background and place it in a controlled studio environment.',
+            '',
+            ...(geometryNote ? [
+                'GEOMETRY ANCHOR — read this first, then cross-check against all reference images:',
+                geometryNote,
+                '',
+            ] : []),
+            'SUBJECT FIDELITY:',
+            'Study every physical detail in the reference images and reproduce them with zero deviation:',
+            '- Count the exact number of prongs. Cross-check by studying the basket structure — prongs connect to the basket, confirming their count and arrangement. Match that exact count.',
+            '- Reproduce the basket exactly: height, wall thickness, side profile, any cut-outs, milgrain, or architectural details. Pay close attention to the cropped basket reference.',
+            '- Reproduce the shoulder junction exactly as described in the geometry anchor above and shown in the cropped shoulder reference. This is the single most important structural detail.',
+            '- Reproduce the band profile exactly: width, thickness, taper, shank shape, and any surface details.',
+            '- Preserve exact metal color, texture, gemstone shape, cut, color, and setting type.',
+            '- If any detail is ambiguous or not visible, preserve the visible silhouette from the reference. Stay conservative — hidden areas stay hidden.',
+            '',
+            'SCENE — SIDE PROFILE VIEW:',
+            'The ring stands upright on its shank. Camera looks at the left (outer-left) edge of the band, capturing the side profile of both band and basket.',
+            '- Camera: table-surface level, 0–5 degrees elevation, horizontal view.',
+            '- Band and lower basket fill the frame. Stone appears at top, partially visible, secondary focus.',
+            '- Only the exterior side wall of the basket is visible from this angle.',
+            '- Clean white (#FFFFFF) surface, soft natural micro-shadow beneath the piece.',
+            '- Square 1:1 frame. Piece occupies ~65% of frame, centered, equal breathing room. White fill for empty areas.',
+            '',
+            'LIGHTING:',
+            'Single overhead softbox. Bright, natural, not clinical. Clean specular highlights showing exact material properties — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle realistic shadow beneath. Professional DSLR macro lens: extremely sharp focus across entire piece, high resolution, luxury commercial photography.',
+            '',
+            'CONSTRAINTS:',
+            '- Reproduce only what exists in the reference. Add nothing.',
+            '- Remove nothing. Preserve every element without simplifying or merging.',
+            '- The shoulder junction, basket walls, and gallery architecture are locked physical geometry from the reference — not open to stylistic interpretation.',
+            ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
+        ].join('\n');
+
+        bandParts = [
+            { text: bandPrompt },
+            ...orderedImages.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+        ];
+    }
+
+    const prompt = isBand ? null : [
         'Use the uploaded image(s) as the EXACT reference of the jewelry piece.',
         contextNote,
         '',
@@ -563,7 +654,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
     ].join('\n');
 
-    const parts = [
+    const parts = bandParts ?? [
         { text: prompt },
         ...promptInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
