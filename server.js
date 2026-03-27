@@ -418,7 +418,7 @@ Be extremely specific. Use measurements like "sharp 90-degree step", "smooth S-c
 
     try {
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-pro-preview-03-25',
+            model: 'gemini-3-pro-preview',
             contents: [{ parts }],
         });
         return response.candidates?.[0]?.content?.parts?.find(p => p.text)?.text?.trim() || null;
