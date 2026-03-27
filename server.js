@@ -565,50 +565,34 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         const frontRef   = hasFrontRef ? [promptInputs[promptInputs.length - 1]] : [];
         const crops      = await generateShoulderCrops(originals);
         const geometryNote = await generateGeometryNote(originals, crops);
-        const numCroppedRefs = crops.length;
-
         // Image order: originals → crops → front ref (last)
         const orderedImages = [...originals, ...crops, ...frontRef];
 
         const bandPrompt = [
-            `You have ${originals.length} original reference photo(s) of a jewelry piece, ${numCroppedRefs} cropped close-up(s) of the shoulder junction and basket, and${hasFrontRef ? ' one approved rendered front view (the last image).' : ' no rendered front view.'}`,
-            '',
-            'The original references are the primary authority for every physical detail. The cropped close-ups isolate the most critical structural areas. The rendered front view is a secondary consistency check for stone layout, metal color, and finish.',
-            '',
+            'Use the uploaded image(s) as the EXACT reference of the jewelry piece.',
             contextNote,
             '',
-            'TASK: Generate a professional luxury product photograph of this EXACT jewelry piece for a high-end e-commerce listing. Extract the piece from its current background and place it in a controlled studio environment.',
+            `You have ${originals.length} original reference photo(s) and${hasFrontRef ? ' one approved rendered front view (the last image). The originals are your primary authority for every physical detail. The rendered front view is a secondary check for stone layout, metal color, and finish.' : ' no rendered front view. The originals are your primary authority for every physical detail.'}`,
+            '',
+            'TASK: Extract this jewelry piece from its background and generate a professional luxury product photograph for a high-end e-commerce listing.',
             '',
             ...(geometryNote ? [
-                'GEOMETRY ANCHOR — read this first, then cross-check against all reference images:',
+                'GEOMETRY ANCHOR — read this first, then cross-check against reference images:',
                 geometryNote,
                 '',
             ] : []),
             'SUBJECT FIDELITY:',
-            'Study every physical detail in the reference images and reproduce them with zero deviation:',
-            '- Count the exact number of prongs. Cross-check by studying the basket structure — prongs connect to the basket, confirming their count and arrangement. Match that exact count.',
-            '- Reproduce the basket exactly: height, wall thickness, side profile, any cut-outs, milgrain, or architectural details. Pay close attention to the cropped basket reference.',
-            '- Reproduce the shoulder junction exactly as described in the geometry anchor above and shown in the cropped shoulder reference. This is the single most important structural detail.',
-            '- Reproduce the band profile exactly: width, thickness, taper, shank shape, and any surface details.',
-            '- Preserve exact metal color, texture, gemstone shape, cut, color, and setting type.',
-            '- If any detail is ambiguous or not visible, preserve the visible silhouette from the reference. Stay conservative — hidden areas stay hidden.',
+            'Reproduce every physical detail from the reference with zero deviation. Count prongs exactly — cross-check against the basket structure to confirm count and arrangement. Reproduce the basket (height, wall thickness, side profile, cut-outs, milgrain, architectural details), the shoulder junction (the exact curve, angle, step, undercut, or sweep where the shank meets the basket base), and the band profile (width, thickness, taper, shank shape, surface details). Preserve exact metal color, texture, gemstone shape, cut, color, and setting type. If any detail is ambiguous, preserve the visible silhouette from the reference — hidden areas stay hidden.',
             '',
             'SCENE — SIDE PROFILE VIEW:',
-            'The ring stands upright on its shank. Camera looks at the left (outer-left) edge of the band, capturing the side profile of both band and basket.',
-            '- Camera: table-surface level, 0–5 degrees elevation, horizontal view.',
-            '- Band and lower basket fill the frame. Stone appears at top, partially visible, secondary focus.',
-            '- Only the exterior side wall of the basket is visible from this angle.',
-            '- Clean white (#FFFFFF) surface, soft natural micro-shadow beneath the piece.',
-            '- Square 1:1 frame. Piece occupies ~65% of frame, centered, equal breathing room. White fill for empty areas.',
+            'Ring stands upright on its shank. Camera at table-surface level (0–5° elevation), looking horizontally at the left (outer-left) edge of the band. Band and lower basket fill the frame. Stone at top, partially visible, secondary focus. Only the exterior side wall of the basket is visible. Clean white (#FFFFFF) surface, soft micro-shadow beneath. Square 1:1, piece at ~65% of frame, centered, white fill.',
             '',
             'LIGHTING:',
-            'Single overhead softbox. Bright, natural, not clinical. Clean specular highlights showing exact material properties — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle realistic shadow beneath. Professional DSLR macro lens: extremely sharp focus across entire piece, high resolution, luxury commercial photography.',
+            'Single overhead softbox. Bright, natural. Clean specular highlights — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle shadow beneath. DSLR macro lens quality: sharp focus across entire piece.',
             '',
             'CONSTRAINTS:',
-            '- Reproduce only what exists in the reference. Add nothing.',
-            '- Remove nothing. Preserve every element without simplifying or merging.',
-            '- The shoulder junction, basket walls, and gallery architecture are locked physical geometry from the reference — not open to stylistic interpretation.',
-            ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
+            'Reproduce only what exists in the reference. Add nothing, remove nothing. The shoulder junction, basket walls, and gallery architecture are locked geometry from the reference, not open to interpretation.',
+            ...(customInstruction ? ['', customInstruction] : []),
         ].join('\n');
 
         bandParts = [
