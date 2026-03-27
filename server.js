@@ -102,7 +102,9 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
 
             const [elevatedData, bandData, detailData] = await Promise.all([
                 generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[1]),
-                generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[2]),
+                // Band shot: don't pass the front ref — it hides the shoulder/basket junction
+                // and misleads the model. Use only the original reference photos.
+                generateEcommerceShot(imageInputs, customInstruction, ANGLES[2], false),
                 generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[3]),
             ]);
 
@@ -254,7 +256,8 @@ app.get('/batch', async (req, res) => {
                         send({ type: 'angle_done', product: productName, angle: 'elevated', label: ANGLES[1].label, savedTo: p });
                     })
                     .catch(err => send({ type: 'angle_error', product: productName, angle: 'elevated', message: err.message })),
-                generateEcommerceShot(refsForAngles, customInstruction, ANGLES[2])
+                // Band: use only original refs, not the generated front — front hides shoulder
+                generateEcommerceShot(imageInputs, customInstruction, ANGLES[2], false)
                     .then(b64 => {
                         const p = path.join(outDir, 'band.png');
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
@@ -441,7 +444,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the ring.',
         '- BASKET FIDELITY: The basket/setting side wall is clearly visible in this shot. Reproduce its EXACT profile from the reference: its height, the angle of its walls, any decorative cut-outs, claws, or architectural details on the side. Do NOT simplify or invent the basket shape.',
         '- BAND FIDELITY: Reproduce the exact band profile: width, thickness, taper, shank shape (flat, rounded, knife-edge, etc.), and any surface details (milgrain, channel stones, engravings) visible on the side face.',
-        '- SHOULDER JUNCTION: Pay close attention to exactly how the band connects to the base of the basket. This junction (the shoulder) is unique to each ring design — it may have a specific curve, step, cutout, or decorative element. Reproduce it exactly from the reference. Do NOT smooth it into a generic taper.',
+        '- SHOULDER JUNCTION (CRITICAL): The exact point where the shank meets the base of the basket is UNIQUE to this ring. In the reference image(s), locate both shoulders and study their shape precisely. Reproduce them identically — the curve, the angle, any step or undercut, any decorative sweep. Do NOT invent, smooth, or generalize. This is the most hallucination-prone area — pay extra attention.',
         '- The band and lower basket fill the frame. The stone appears at the TOP partially visible but is NOT the focus.',
         '- CRITICAL: Do NOT show the INTERIOR or UNDERSIDE of the basket — only the EXTERIOR SIDE WALL is visible from this angle.',
         '- STRICT: Do NOT invent decorative elements not present in the reference image.',
@@ -485,7 +488,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '',
         'PRONG COUNT: Count the EXACT number of prongs in the reference image. Then cross-check by studying the basket and gallery structure — the prongs connect to the basket, so the basket shape confirms the prong count and arrangement. Reproduce that EXACT number. Do NOT default to 4 prongs — if the reference has 6, 8, 12, or any other count, match it precisely. The prong count is a fixed physical property of the ring.',
         'BASKET/SETTING: Reproduce the basket exactly — its height, wall thickness, side profile shape, any decorative cut-outs, milgrain, or architectural details. The basket is as much a design element as the stone. Do NOT simplify it into a plain cone or cylinder.',
-        'SHOULDER (where band meets basket): This is a critical design element. Study the reference carefully — the shoulder may be straight, tapered, curved, swept, decorated with stones/milgrain/filigree, or architecturally shaped. Reproduce the EXACT way the shank transitions into the base of the basket on both sides. Do NOT default to a plain smooth taper. The shoulder junction must match the reference precisely.',
+        'SHOULDER (where band meets basket): HIGHEST PRIORITY. The shoulder is the exact point where the shank widens or transitions into the base of the setting. Look at the reference and find this junction on BOTH sides of the ring. It may have a specific curve, step, undercut, cut-out, swept wing, or decorative shape. You MUST reproduce it exactly — do NOT smooth it, simplify it, or replace it with a generic taper. If you cannot see both shoulders clearly in a single reference image, look at ALL reference images provided and piece together the full picture. Inventing or guessing the shoulder shape is not acceptable.',
         '',
         ...sceneBlock,
         '',
