@@ -114,7 +114,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
             ];
         }
         if (outputType === 'model' || outputType === 'both') {
-            const raw = await generateModelShot(primary.base64, primary.mimeType, customInstruction);
+            const raw = await generateModelShot(imageInputs, customInstruction);
             results.model = raw;
         }
 
@@ -145,15 +145,14 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     try {
         // Model shot retry
         if (angleId === 'model') {
-            const primary = imageInputs[0];
-            const imageData = await generateModelShot(primary.base64, primary.mimeType, customInstruction);
+            const imageData = await generateModelShot(imageInputs, customInstruction);
             return res.json({ success: true, imageData });
         }
 
         const angle = ANGLES.find(a => a.id === angleId);
         if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
 
-        const imageData = await generateEcommerceShot(imageInputs, customInstruction, angle);
+        const imageData = await generateEcommerceShot(imageInputs, customInstruction, angle, false);
         res.json({ success: true, imageData });
     } catch (err) {
         console.error('[Generate-Angle Error]', err?.message || err);
@@ -269,7 +268,7 @@ app.get('/batch', async (req, res) => {
                         send({ type: 'angle_done', product: productName, angle: 'detail', label: ANGLES[3].label, savedTo: p });
                     })
                     .catch(err => send({ type: 'angle_error', product: productName, angle: 'detail', message: err.message })),
-                generateModelShot(imageInputs[0].base64, imageInputs[0].mimeType, customInstruction)
+                generateModelShot(imageInputs, customInstruction)
                     .then(modelB64 => {
                         const p = path.join(outDir, 'model.png');
                         fs.writeFileSync(p, Buffer.from(modelB64, 'base64'));
@@ -319,8 +318,7 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
         }));
 
         if (angleId === 'model') {
-            const primary = imageInputs[0];
-            const raw = await generateModelShot(primary.base64, primary.mimeType, null);
+            const raw = await generateModelShot(imageInputs, null);
             const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), 'model.png');
             fs.mkdirSync(path.dirname(outPath), { recursive: true });
             fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
@@ -330,7 +328,7 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
         const angle = ANGLES.find(a => a.id === angleId);
         if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
 
-        const imgBase64 = await generateEcommerceShot(imageInputs, null, angle);
+        const imgBase64 = await generateEcommerceShot(imageInputs, null, angle, false);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, Buffer.from(imgBase64, 'base64'));
@@ -398,8 +396,8 @@ function buildZip(entries) {
 }
 
 // ── Ecommerce shot ──────────────────────────────────────────────────────────
-async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0]) {
-    const hasFrontRef = imageInputs.length > 1 && angle.id !== 'front';
+async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0], hasFrontRef = null) {
+    if (hasFrontRef === null) hasFrontRef = imageInputs.length > 1 && angle.id !== 'front';
     const numOriginalRefs = hasFrontRef ? imageInputs.length - 1 : imageInputs.length;
     const contextNote = hasFrontRef
         ? `You have ${imageInputs.length} images. The first ${numOriginalRefs} are original reference photo(s) of the jewelry \u2014 these may be DIFFERENT ANGLES of the same piece (front, side, top, close-up, etc.). Study EVERY reference image carefully: each angle reveals details that other angles may hide (e.g., a side view shows band profile, a top view shows stone arrangement, a close-up shows prong details). Build a COMPLETE mental model of the piece by combining information from ALL angles before generating. The LAST image is the APPROVED RENDERED FRONT VIEW of this exact piece \u2014 match its design exactly.`
@@ -436,6 +434,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Square 1:1 frame. White fill any empty areas.',
     ] : isBand ? [
         'SCENE \u2014 BAND FOCUS:',
+        `- REFERENCE USAGE: If any of the ${numOriginalRefs} reference image(s) shows a side or band-profile view of the ring, treat that image as the PRIMARY source for this shot — it directly shows what you need to reproduce here.`,
         '- The ring stands UPRIGHT on its shank, positioned so the camera sees the SIDE PROFILE of the band.',
         '- Specifically: rotate the ring so the camera is looking at the LEFT (or OUTER-LEFT) edge of the band shank.',
         '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the band.',
@@ -511,7 +510,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
 }
 
 // ── Model shot ──────────────────────────────────────────────────────────────
-async function generateModelShot(base64Image, mimeType, customInstruction) {
+async function generateModelShot(imageInputs, customInstruction) {
     const sceneInstruction = customInstruction
         ? `Place the jewelry in this scene: ${customInstruction}.`
         : 'Show the jewelry worn on a woman\'s hand \u2014 tight close-up cropped to ONLY the hand and wrist. No face, no body, no neck, no full arm. Just the hand. Natural, elegant hand with relaxed fingers in a graceful pose. Single soft key light from camera-left. Shallow depth of field with the jewelry in razor-sharp focus and the background gently blurred. Square 1:1 crop.';
@@ -579,9 +578,13 @@ async function generateModelShot(base64Image, mimeType, customInstruction) {
         'The jewelry must be the absolute focal point. Every surface facet and metal texture must be visible and physically correct.',
     ].join('\n');
 
+    const refNote = imageInputs.length > 1
+        ? `You have ${imageInputs.length} reference photos of the jewelry piece from different angles. Study ALL of them to build a complete understanding of the piece before generating.`
+        : 'You have been given one reference photo of the jewelry piece.';
+
     const parts = [
-        { text: prompt },
-        { inlineData: { mimeType, data: base64Image } },
+        { text: refNote + '\n\n' + prompt },
+        ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
     const raw = await callGemini(parts);
     return makeSquareBase64(raw);
