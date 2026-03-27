@@ -1,0 +1,9 @@
+# Environment
+.env
+
+# Dependencies
+node_modules/
+
+# Backup files
+*.bak
+*.bak2
