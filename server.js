@@ -256,8 +256,7 @@ app.get('/batch', async (req, res) => {
                         send({ type: 'angle_done', product: productName, angle: 'elevated', label: ANGLES[1].label, savedTo: p });
                     })
                     .catch(err => send({ type: 'angle_error', product: productName, angle: 'elevated', message: err.message })),
-                // Band: use only original refs, not the generated front — front hides shoulder
-                generateEcommerceShot(imageInputs, customInstruction, ANGLES[2], false)
+                generateEcommerceShot(refsForAngles, customInstruction, ANGLES[2])
                     .then(b64 => {
                         const p = path.join(outDir, 'band.png');
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
@@ -438,7 +437,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Square 1:1 frame. White fill any empty areas.',
     ] : isBand ? [
         'SCENE \u2014 BAND & BASKET SIDE PROFILE:',
-        `- REFERENCE USAGE: If any of the ${numOriginalRefs} reference image(s) shows a side or band-profile view of the ring, treat that image as the PRIMARY source for this shot — it directly shows what you need to reproduce here.`,
+        `- REFERENCE USAGE: You have ${numOriginalRefs} original reference photo(s) plus one approved rendered front view (the last image). Use the ORIGINAL reference photos as the primary authority for the shoulder shape, band profile, and basket structure — these are real photos that show the actual geometry. Use the rendered front view ONLY to match metal color, stone color, and overall finish consistency. Do NOT use the front view to infer the shoulder or band shape — it does not show them accurately from this angle.`,
         '- The ring stands UPRIGHT on its shank, positioned so the camera sees the SIDE PROFILE of the band AND basket.',
         '- Specifically: rotate the ring so the camera is looking at the LEFT (or OUTER-LEFT) edge of the band shank.',
         '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the ring.',
