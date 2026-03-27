@@ -102,9 +102,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
 
             const [elevatedData, bandData, detailData] = await Promise.all([
                 generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[1]),
-                // Band shot: don't pass the front ref — it hides the shoulder/basket junction
-                // and misleads the model. Use only the original reference photos.
-                generateEcommerceShot(imageInputs, customInstruction, ANGLES[2], false),
+                generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[2]),
                 generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[3]),
             ]);
 
@@ -154,7 +152,12 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
         const angle = ANGLES.find(a => a.id === angleId);
         if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
 
-        const imageData = await generateEcommerceShot(imageInputs, customInstruction, angle, false);
+        const frontRefBase64 = (req.body.frontRef || '').trim().replace(/^data:image\/\w+;base64,/, '');
+        const refsForAngle = angleId !== 'front' && frontRefBase64
+            ? [...imageInputs, { base64: frontRefBase64, mimeType: 'image/png' }]
+            : imageInputs;
+
+        const imageData = await generateEcommerceShot(refsForAngle, customInstruction, angle);
         res.json({ success: true, imageData });
     } catch (err) {
         console.error('[Generate-Angle Error]', err?.message || err);
@@ -330,7 +333,12 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
         const angle = ANGLES.find(a => a.id === angleId);
         if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
 
-        const imgBase64 = await generateEcommerceShot(imageInputs, null, angle, false);
+        const frontPath = path.join(productFolder, '..', 'output', path.basename(productFolder), 'front.png');
+        const refsForAngle = angleId !== 'front' && fs.existsSync(frontPath)
+            ? [...imageInputs, { base64: fs.readFileSync(frontPath).toString('base64'), mimeType: 'image/png' }]
+            : imageInputs;
+
+        const imgBase64 = await generateEcommerceShot(refsForAngle, null, angle);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, Buffer.from(imgBase64, 'base64'));
@@ -399,17 +407,22 @@ function buildZip(entries) {
 
 // ── Ecommerce shot ──────────────────────────────────────────────────────────
 async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0], hasFrontRef = null) {
-    if (hasFrontRef === null) hasFrontRef = imageInputs.length > 1 && angle.id !== 'front';
-    const numOriginalRefs = hasFrontRef ? imageInputs.length - 1 : imageInputs.length;
-    const contextNote = hasFrontRef
-        ? `You have ${imageInputs.length} images. The first ${numOriginalRefs} are original reference photo(s) of the jewelry \u2014 these may be DIFFERENT ANGLES of the same piece (front, side, top, close-up, etc.). Study EVERY reference image carefully: each angle reveals details that other angles may hide (e.g., a side view shows band profile, a top view shows stone arrangement, a close-up shows prong details). Build a COMPLETE mental model of the piece by combining information from ALL angles before generating. The LAST image is the APPROVED RENDERED FRONT VIEW of this exact piece \u2014 match its design exactly.`
-        : numOriginalRefs > 1
-            ? `You have ${numOriginalRefs} reference photos of the jewelry piece. These are DIFFERENT ANGLES of the SAME piece \u2014 front, side, top, close-up, etc. BEFORE generating anything, study EVERY single reference image and combine the information: each angle reveals details hidden in the others. A side view shows the band profile and gallery. A top view shows stone arrangement. A close-up shows prong count and texture. Build a COMPLETE mental model of the piece from ALL angles, then generate.`
-            : 'You have been given one reference photo of the jewelry piece. Study every detail carefully.';
-
     const isDetail   = angle.id === 'detail';
     const isElevated = angle.id === 'elevated';
     const isBand     = angle.id === 'band';
+
+    const promptInputs = imageInputs;
+    if (hasFrontRef === null) {
+        hasFrontRef = angle.id !== 'front'
+            && promptInputs.length > 1
+            && promptInputs[promptInputs.length - 1]?.mimeType === 'image/png';
+    }
+    const numOriginalRefs = hasFrontRef ? promptInputs.length - 1 : promptInputs.length;
+    const contextNote = hasFrontRef
+        ? `You have ${promptInputs.length} images. The first ${numOriginalRefs} are original reference photo(s) of the jewelry \u2014 these may be DIFFERENT ANGLES of the same piece (front, side, top, close-up, etc.). Study EVERY reference image carefully: each angle reveals details that other angles may hide (e.g., a side view shows band profile, a top view shows stone arrangement, a close-up shows prong details). Build a COMPLETE mental model of the piece by combining information from ALL angles before generating. The LAST image is the APPROVED RENDERED FRONT VIEW of this exact piece \u2014 match its design exactly.`
+        : numOriginalRefs > 1
+            ? `You have ${numOriginalRefs} reference photos of the jewelry piece. These are DIFFERENT ANGLES of the SAME piece \u2014 front, side, top, close-up, etc. BEFORE generating anything, study EVERY single reference image and combine the information: each angle reveals details hidden in the others. A side view shows the band profile and gallery. A top view shows stone arrangement. A close-up shows prong count and texture. Build a COMPLETE mental model of the piece from ALL angles, then generate.`
+            : 'You have been given one reference photo of the jewelry piece. Study every detail carefully.';
 
     const sceneBlock = isDetail ? [
         'SCENE \u2014 MACRO CLOSE-UP:',
@@ -427,8 +440,10 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Ring stands UPRIGHT on its shank on a clean white surface \u2014 NOT lying flat.',
         '- Camera is at roughly the same height as the ring (near table level), angled about 30\u201340 degrees to the side.',
         '- This is the classic jewelry-store display angle: you see the stone face AND the side profile of the setting simultaneously.',
+        '- ORIGINAL REFERENCES OVERRIDE: For the basket walls, gallery, and shoulder junction, trust the original reference photo(s) over any rendered front view. Those side-geometry details must come from the real photos, not from generic ring priors.',
         '- The side of the setting, prongs, basket walls, gallery, and upper band are clearly visible \u2014 this shot reveals the 3D architecture that a front view hides.',
         '- BASKET FIDELITY: Reproduce the exact basket/setting side profile from the reference — its height, wall angle, any side decorations or cut-outs. Do NOT simplify or round off the basket.',
+        '- SHOULDER FIDELITY: Reproduce the exact shoulder-to-basket junction from the reference — the same curve, step, taper break, undercut, or decorative sweep. Do NOT replace it with a generic cathedral shoulder or smooth taper.',
         '- DO NOT shoot from above. The camera must be near the ring\'s eye-level, NOT looking down at it.',
         '- Every design detail from the front view (stone count, band pattern, basket shape, setting type, metal color) MUST be visible and identical.',
         '- Soft, natural drop shadow directly beneath the piece.',
@@ -437,13 +452,16 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Square 1:1 frame. White fill any empty areas.',
     ] : isBand ? [
         'SCENE \u2014 BAND & BASKET SIDE PROFILE:',
-        `- REFERENCE USAGE: You have ${numOriginalRefs} original reference photo(s) plus one approved rendered front view (the last image). Use the ORIGINAL reference photos as the primary authority for the shoulder shape, band profile, and basket structure — these are real photos that show the actual geometry. Use the rendered front view ONLY to match metal color, stone color, and overall finish consistency. Do NOT use the front view to infer the shoulder or band shape — it does not show them accurately from this angle.`,
+        hasFrontRef
+            ? `- REFERENCE USAGE: You have ${numOriginalRefs} ORIGINAL reference photo(s) plus one approved rendered front view (the last image). Use the ORIGINAL reference photo(s) as the primary authority for the shoulder shape, band profile, basket structure, and gallery geometry. Use the rendered front view as an additional consistency reference for the approved front-facing design, stone layout, metal color, and finish.`
+            : `- REFERENCE USAGE: Use the ${numOriginalRefs} ORIGINAL reference photo(s) as the authority for the shoulder shape, band profile, basket structure, and gallery geometry in this shot.`,
         '- The ring stands UPRIGHT on its shank, positioned so the camera sees the SIDE PROFILE of the band AND basket.',
         '- Specifically: rotate the ring so the camera is looking at the LEFT (or OUTER-LEFT) edge of the band shank.',
         '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the ring.',
         '- BASKET FIDELITY: The basket/setting side wall is clearly visible in this shot. Reproduce its EXACT profile from the reference: its height, the angle of its walls, any decorative cut-outs, claws, or architectural details on the side. Do NOT simplify or invent the basket shape.',
         '- BAND FIDELITY: Reproduce the exact band profile: width, thickness, taper, shank shape (flat, rounded, knife-edge, etc.), and any surface details (milgrain, channel stones, engravings) visible on the side face.',
         '- SHOULDER JUNCTION (CRITICAL): The exact point where the shank meets the base of the basket is UNIQUE to this ring. In the reference image(s), locate both shoulders and study their shape precisely. Reproduce them identically — the curve, the angle, any step or undercut, any decorative sweep. Do NOT invent, smooth, or generalize.',
+        '- NEGATIVE CONSTRAINT: Do NOT default to a generic cathedral shoulder, donut gallery, peg-head, tulip basket, cone basket, or smooth solitaire taper unless the reference explicitly shows that exact structure.',
         '- The band and lower basket fill the frame. The stone appears at the TOP partially visible but is NOT the focus.',
         '- CRITICAL: Do NOT show the INTERIOR or UNDERSIDE of the basket — only the EXTERIOR SIDE WALL is visible from this angle.',
         '- STRICT: Do NOT invent decorative elements not present in the reference image.',
@@ -476,7 +494,39 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- No fill lights, no rim lights \u2014 one source only',
     ];
 
-    const prompt = [
+    const prompt = isBand ? [
+        `You have ${numOriginalRefs} original reference photo(s) of a jewelry piece${hasFrontRef ? ', plus one approved rendered front view (the last image). The original reference photo(s) are the primary authority for every physical detail. The rendered front view is a secondary consistency check for stone layout, metal color, and finish.' : '. The original reference photo(s) are the primary authority for every physical detail.'}`,
+        '',
+        contextNote,
+        '',
+        'TASK: Generate a professional luxury product photograph of this EXACT jewelry piece for a high-end e-commerce listing. Extract the piece from its current background and place it in a controlled studio environment.',
+        '',
+        'SUBJECT — ABSOLUTE FIDELITY TO REFERENCE:',
+        'Study every physical detail in the reference image(s) and reproduce them with zero deviation. This means:',
+        '- Count the exact number of prongs and match that count precisely. Cross-check by studying the basket structure — prongs connect to the basket, confirming their count and arrangement.',
+        '- Reproduce the basket exactly: height, wall thickness, side profile, any cut-outs, milgrain, or architectural details.',
+        '- Reproduce the shoulder junction (where the shank meets the base of the basket) exactly as it appears in the reference — its curve, angle, any step, undercut, or decorative sweep. Study both shoulders across all reference images.',
+        '- Reproduce the band profile exactly: width, thickness, taper, shank shape (flat, rounded, knife-edge), and any surface details (milgrain, channel stones, engravings).',
+        '- Preserve the exact metal color, texture, gemstone shape, cut, color, and setting type.',
+        '- If any detail is not clearly visible in the reference, leave it hidden or show only what the reference supports. Stay conservative with ambiguous areas — preserve the visible silhouette rather than guessing.',
+        '',
+        'SCENE — SIDE PROFILE VIEW:',
+        'The ring stands upright on its shank. The camera looks at the left (outer-left) edge of the band, capturing the side profile of both the band and the basket.',
+        '- Camera height: table-surface level, 0–5 degrees elevation, looking horizontally at the side of the ring.',
+        '- The band and lower basket fill the frame. The stone appears at the top, partially visible, but is secondary to the band and setting structure.',
+        '- Only the exterior side wall of the basket is visible from this angle.',
+        '- Clean white (#FFFFFF) surface with a soft, natural micro-shadow beneath the piece.',
+        '- Square 1:1 frame. The piece occupies roughly 65% of the frame, centered, with equal breathing room on all sides. Fill empty areas with white.',
+        '',
+        'LIGHTING:',
+        'Single overhead softbox producing bright but natural light. Clean specular highlights that reveal exact material properties — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle, realistic shadow and reflection beneath the piece. Professional DSLR macro lens quality: extremely sharp focus across the entire piece, high resolution, luxury commercial photography.',
+        '',
+        'CONSTRAINTS:',
+        '- Reproduce only what exists in the reference. Add nothing: no extra stones, no split shanks, no decorative elements, no design improvements.',
+        '- Remove nothing: preserve every element from the reference without simplifying or merging.',
+        '- Do not default to generic ring archetypes (cathedral shoulder, donut gallery, peg-head, tulip basket, cone basket, smooth solitaire taper) unless the reference explicitly shows that structure.',
+        ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
+    ].join('\n') : [
         'Use the uploaded image(s) as the EXACT reference of the jewelry piece.',
         contextNote,
         '',
@@ -484,6 +534,13 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         'The jewelry must remain 100% identical to the original image(s) — do NOT change the design, shape, gemstones, metal color, texture, proportions, prong count, prong style, setting type, shank profile, or ANY details whatsoever.',
         'Do NOT add features not in the reference: no extra stones, no split shanks unless the reference has one, no decorative elements, no design "improvements."',
         'Do NOT remove, simplify, or merge any element from the reference.',
+        '',
+        'ZERO-TOLERANCE GEOMETRY CHECK FOR RINGS:',
+        '- Basket/setting shape and the shoulder junction are LOCKED physical geometry, not stylistic interpretation.',
+        '- Use the ORIGINAL reference photo(s) as the authority for basket height, basket wall angle, gallery architecture, and the exact point where the shank meets the basket.',
+        '- Do NOT replace those areas with a generic ring archetype such as a cathedral shoulder, smooth taper, donut gallery, cone basket, peg-head, or tulip setting.',
+        '- If the chosen camera angle would naturally hide part of the basket or shoulder, keep that area hidden or only as visible as the real reference supports. Do NOT reveal invented side geometry.',
+        '- If any basket or shoulder detail is ambiguous, stay conservative and preserve the visible silhouette from the reference instead of guessing.',
         '',
         'PRONG COUNT: Count the EXACT number of prongs in the reference image. Then cross-check by studying the basket and gallery structure — the prongs connect to the basket, so the basket shape confirms the prong count and arrangement. Reproduce that EXACT number. Do NOT default to 4 prongs — if the reference has 6, 8, 12, or any other count, match it precisely. The prong count is a fixed physical property of the ring.',
         'BASKET/SETTING: Reproduce the basket exactly — its height, wall thickness, side profile shape, any decorative cut-outs, milgrain, or architectural details. The basket is as much a design element as the stone. Do NOT simplify it into a plain cone or cylinder.',
@@ -508,7 +565,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
 
     const parts = [
         { text: prompt },
-        ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+        ...promptInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
 
     const raw = await callGemini(parts);
@@ -530,6 +587,8 @@ async function generateModelShot(imageInputs, customInstruction) {
         '- Every design detail: prong count, setting style, engraving, filigree, milgrain, links, clasps, chain pattern',
         '- Proportions and scale must match the reference exactly \u2014 do not resize, idealise, or simplify any element',
         '- Do NOT add stones that are not in the reference. Do NOT remove or merge design elements. Do NOT change the metal color.',
+        '- IF THE JEWELRY IS A RING: preserve the exact basket/setting profile and the exact shoulder junction where the shank meets the basket. Do NOT replace them with a generic cathedral shoulder, smooth taper, cone basket, donut gallery, peg-head, or tulip setting.',
+        '- IF THE JEWELRY IS A RING: if the hand pose or camera angle partly hides the basket or shoulder, keep those areas hidden rather than inventing geometry that is not supported by the reference.',
         '',
         'PHOTOGRAPHIC REALISM \u2014 this must be indistinguishable from an editorial photo in Vogue or Harper\'s Bazaar:',
         '',
@@ -629,7 +688,7 @@ async function callGemini(parts, attempt = 0) {
     try {
         console.log(`[Gemini] calling... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
+            model: 'gemini-3.1-flash-image-preview',
             contents: [{ parts }],
             config: { responseModalities: ['TEXT', 'IMAGE'] },
         });
