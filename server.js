@@ -397,37 +397,6 @@ function buildZip(entries) {
     return Buffer.concat([...localHeaders, centralBuf, eocd]);
 }
 
-// ── Shoulder geometry analysis (text-only, band shot pre-step) ──────────────
-async function analyzeShoulderGeometry(imageInputs) {
-    const originalInputs = imageInputs.filter(img => img.mimeType === 'image/jpeg');
-    const analysisInputs = originalInputs.length > 0 ? originalInputs : imageInputs;
-
-    const parts = [
-        ...analysisInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
-        { text: `You are a jewelry technical analyst. Study these reference photos and describe ONLY the shoulder area of the ring — the exact point where the band/shank transitions into the base of the setting/basket on each side.
-
-Answer these questions precisely:
-1. Shape of the transition: Does the band flow directly into the basket, or is there a step, undercut, swept wing, curved shoulder, or raised platform?
-2. Angle: Does the band meet the basket at a sharp angle, a gradual curve, or a straight horizontal line?
-3. Decorative elements at the shoulder: Any milgrain, channel-set stones, filigree, cutouts, or surface texture?
-4. Width change: Does the band taper toward the basket, flare outward, or stay consistent?
-5. Symmetry: Are both shoulders (left and right) identical?
-
-Be extremely specific. Use measurements like "sharp 90-degree step", "smooth S-curve", "straight taper at roughly 30 degrees", etc. This will be used as strict ground truth for image generation.` },
-    ];
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: [{ parts }],
-        });
-        return response.candidates?.[0]?.content?.parts?.find(p => p.text)?.text?.trim() || null;
-    } catch (err) {
-        console.warn('[Shoulder analysis failed, skipping]', err.message);
-        return null;
-    }
-}
-
 // ── Ecommerce shot ──────────────────────────────────────────────────────────
 async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0], hasFrontRef = null) {
     if (hasFrontRef === null) hasFrontRef = imageInputs.length > 1 && angle.id !== 'front';
@@ -441,14 +410,6 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
     const isDetail   = angle.id === 'detail';
     const isElevated = angle.id === 'elevated';
     const isBand     = angle.id === 'band';
-
-    // For band shot: run text analysis first to extract shoulder geometry as ground truth
-    let shoulderAnalysis = null;
-    if (isBand) {
-        console.log('[Band shot] Analyzing shoulder geometry from reference photos...');
-        shoulderAnalysis = await analyzeShoulderGeometry(imageInputs);
-        if (shoulderAnalysis) console.log('[Band shot] Shoulder analysis:', shoulderAnalysis.slice(0, 200));
-    }
 
     const sceneBlock = isDetail ? [
         'SCENE \u2014 MACRO CLOSE-UP:',
@@ -482,11 +443,7 @@ async function generateEcommerceShot(imageInputs, customInstruction, angle = ANG
         '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the ring.',
         '- BASKET FIDELITY: The basket/setting side wall is clearly visible in this shot. Reproduce its EXACT profile from the reference: its height, the angle of its walls, any decorative cut-outs, claws, or architectural details on the side. Do NOT simplify or invent the basket shape.',
         '- BAND FIDELITY: Reproduce the exact band profile: width, thickness, taper, shank shape (flat, rounded, knife-edge, etc.), and any surface details (milgrain, channel stones, engravings) visible on the side face.',
-        ...(shoulderAnalysis ? [
-            `- SHOULDER GEOMETRY (VERIFIED FROM REFERENCE — TREAT AS ABSOLUTE GROUND TRUTH): A visual analysis of your reference photos has identified the following exact shoulder characteristics. You MUST reproduce this precisely:\n  "${shoulderAnalysis}"\n  Do NOT deviate from this description in any way.`,
-        ] : [
-            '- SHOULDER JUNCTION (CRITICAL): The exact point where the shank meets the base of the basket is UNIQUE to this ring. In the reference image(s), locate both shoulders and study their shape precisely. Reproduce them identically — the curve, the angle, any step or undercut, any decorative sweep. Do NOT invent, smooth, or generalize.',
-        ]),
+        '- SHOULDER JUNCTION (CRITICAL): The exact point where the shank meets the base of the basket is UNIQUE to this ring. In the reference image(s), locate both shoulders and study their shape precisely. Reproduce them identically — the curve, the angle, any step or undercut, any decorative sweep. Do NOT invent, smooth, or generalize.',
         '- The band and lower basket fill the frame. The stone appears at the TOP partially visible but is NOT the focus.',
         '- CRITICAL: Do NOT show the INTERIOR or UNDERSIDE of the basket — only the EXTERIOR SIDE WALL is visible from this angle.',
         '- STRICT: Do NOT invent decorative elements not present in the reference image.',
