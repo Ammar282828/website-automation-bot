@@ -342,6 +342,36 @@
     .field-input::placeholder { color: var(--muted2); }
     .field-input:focus { border-color: var(--gold); }
 
+    /* ── URL Scrape ── */
+    .url-scrape-row { margin-top: 12px; }
+    .url-scrape-divider {
+      text-align: center; position: relative; margin: 8px 0 12px;
+    }
+    .url-scrape-divider::before {
+      content: ''; position: absolute; left: 0; right: 0; top: 50%;
+      border-top: 1px solid var(--border);
+    }
+    .url-scrape-divider span {
+      position: relative; background: var(--surface); padding: 0 12px;
+      font-size: 0.78rem; color: var(--muted2); font-weight: 500;
+    }
+    .url-scrape-input-row { display: flex; gap: 8px; }
+    .url-scrape-input-row .field-input { flex: 1; font-size: 0.82rem; }
+    .btn-scrape {
+      padding: 8px 16px; font-size: 0.82rem; font-weight: 600;
+      border-radius: var(--radius-sm); border: 1px solid var(--gold);
+      background: var(--accent-bg); color: var(--gold); cursor: pointer;
+      font-family: inherit; white-space: nowrap; transition: all 0.2s;
+    }
+    .btn-scrape:hover { background: var(--gold); color: #fff; }
+    .btn-scrape:disabled { opacity: 0.5; cursor: wait; }
+    .url-scrape-status {
+      font-size: 0.78rem; color: var(--muted); margin-top: 6px;
+      min-height: 1.2em;
+    }
+    .url-scrape-status.err { color: var(--danger); }
+    .url-scrape-status.ok { color: var(--success); }
+
     /* ── Buttons ── */
     .btn-generate {
       width: 100%;
@@ -555,6 +585,29 @@
 
     #batch-log { width: 100%; display: none; flex-direction: column; gap: 8px; margin-top: 16px; }
     #batch-log.visible { display: flex; }
+    #batch-status {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent-bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 0.82rem;
+    }
+    #batch-status.visible { display: flex; }
+    .status-spinner {
+      width: 13px; height: 13px;
+      border: 2px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    .status-product { font-weight: 600; color: var(--text); }
+    .status-arrow { color: var(--muted2); }
+    .status-shot { color: var(--muted); }
+    .status-count { margin-left: auto; font-size: 0.75rem; color: var(--muted2); font-variant-numeric: tabular-nums; }
     .log-box {
       background: var(--surface2);
       border: 1px solid var(--border);
@@ -792,6 +845,14 @@
         <p>or click to browse</p>
         <div class="drop-hint">JPG, PNG, HEIC, WEBP — up to 10 images</div>
       </div>
+      <div class="url-scrape-row">
+        <div class="url-scrape-divider"><span>or paste a product link</span></div>
+        <div class="url-scrape-input-row">
+          <input type="text" id="scrape-url" class="field-input" placeholder="https://houseofmina.store/products/..." />
+          <button class="btn-scrape" id="btn-scrape">Fetch Images</button>
+        </div>
+        <div class="url-scrape-status" id="scrape-status"></div>
+      </div>
       <div id="previews">
         <div class="previews-header">
           <span id="preview-count">0 images</span>
@@ -875,6 +936,13 @@
   <!-- ═══ BATCH LOG & RESULTS ═══ -->
   <div id="batch-log">
     <div class="results-title" style="margin-bottom:6px;">Batch Progress</div>
+    <div id="batch-status">
+      <div class="status-spinner"></div>
+      <span class="status-product" id="status-product"></span>
+      <span class="status-arrow">→</span>
+      <span class="status-shot" id="status-shot"></span>
+      <span class="status-count" id="status-count"></span>
+    </div>
     <div class="log-box"><div id="log-entries"></div></div>
   </div>
   <div id="batch-results"></div>
@@ -1124,6 +1192,52 @@
     selectedFiles.splice(index, 1);
     renderPreviews();
   }
+
+  // ── URL Scraping ───────────────────────────────────────────────────────────
+  const scrapeUrlInput  = document.getElementById('scrape-url');
+  const btnScrape       = document.getElementById('btn-scrape');
+  const scrapeStatus    = document.getElementById('scrape-status');
+
+  btnScrape.addEventListener('click', async () => {
+    const url = scrapeUrlInput.value.trim();
+    if (!url) return;
+    btnScrape.disabled = true;
+    btnScrape.textContent = 'Fetching...';
+    scrapeStatus.textContent = '';
+    scrapeStatus.className = 'url-scrape-status';
+    try {
+      const res = await fetch('/scrape-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Failed to fetch.');
+
+      // Convert base64 images to File objects and add them
+      const files = data.images.map((img, i) => {
+        const byteStr = atob(img.base64);
+        const bytes = new Uint8Array(byteStr.length);
+        for (let j = 0; j < byteStr.length; j++) bytes[j] = byteStr.charCodeAt(j);
+        return new File([bytes], img.name, { type: img.mimeType });
+      });
+
+      addFiles(files);
+      scrapeStatus.textContent = `${data.title} — ${files.length} image(s) loaded`;
+      scrapeStatus.className = 'url-scrape-status ok';
+      scrapeUrlInput.value = '';
+    } catch (err) {
+      scrapeStatus.textContent = err.message;
+      scrapeStatus.className = 'url-scrape-status err';
+    } finally {
+      btnScrape.disabled = false;
+      btnScrape.textContent = 'Fetch Images';
+    }
+  });
+
+  scrapeUrlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') btnScrape.click();
+  });
 
   function renderPreviews() {
     previewsGrid.innerHTML = '';
@@ -1383,7 +1497,21 @@
   const batchLog         = document.getElementById('batch-log');
   const logEntries       = document.getElementById('log-entries');
   const batchResultsEl   = document.getElementById('batch-results');
+  const batchStatusEl    = document.getElementById('batch-status');
+  const statusProductEl  = document.getElementById('status-product');
+  const statusShotEl     = document.getElementById('status-shot');
+  const statusCountEl    = document.getElementById('status-count');
   const batchFolderMap   = {};
+
+  let batchTotalShots = 0;
+  let batchDoneShots  = 0;
+
+  function setStatus(product, shot) {
+    statusProductEl.textContent = product || '';
+    statusShotEl.textContent    = shot    || '';
+    statusCountEl.textContent   = batchTotalShots ? `${batchDoneShots} / ${batchTotalShots} shots` : '';
+    batchStatusEl.classList.toggle('visible', !!(product || shot));
+  }
 
   btnCancelBatch.addEventListener('click', async () => {
     btnCancelBatch.textContent = 'Cancelling...';
@@ -1419,11 +1547,14 @@
       const msg = JSON.parse(e.data);
 
       if (msg.type === 'start') {
+        batchTotalShots = (msg.total || 0) * (msg.shots?.length || 0);
+        batchDoneShots  = 0;
         addLog(`Processing ${msg.total} product(s), ${msg.shots?.length || 0} shot(s) each...`, 'info');
 
       } else if (msg.type === 'product_start') {
         addLog(`\n${msg.product}`, 'title');
         addBatchProductSection(msg.product, msg.productFolder);
+        setStatus(msg.product, 'Starting...');
 
       } else if (msg.type === 'product_error') {
         addLog(`  \u2717 ${msg.message}`, 'err');
@@ -1431,12 +1562,16 @@
       } else if (msg.type === 'angle_start') {
         addLog(`  ${msg.label}...`);
         activateBatchPlaceholder(msg.product, msg.angle);
+        setStatus(msg.product, msg.label);
 
       } else if (msg.type === 'angle_done') {
+        batchDoneShots++;
         addLog(`  \u2713 ${msg.label}`, 'ok');
         renderBatchAngleCard(msg.product, msg.angle, msg.label, msg.savedTo);
+        setStatus(msg.product, `\u2713 ${msg.label}`);
 
       } else if (msg.type === 'angle_error') {
+        batchDoneShots++;
         addLog(`  \u2717 ${msg.angle}: ${msg.message}`, 'err');
         markBatchAngleFailed(msg.product, msg.angle);
 
@@ -1448,16 +1583,19 @@
 
       } else if (msg.type === 'cancelled') {
         addLog(`\n${msg.message}`, 'err');
+        setStatus('', '');
         batchFinished = true;
         finishBatch(src);
 
       } else if (msg.type === 'error') {
         addLog(`Error: ${msg.message}`, 'err');
+        setStatus('', '');
         batchFinished = true;
         finishBatch(src);
 
       } else if (msg.type === 'done') {
         addLog('\nBatch complete!', 'ok');
+        setStatus('', '');
         batchFinished = true;
         finishBatch(src);
       }

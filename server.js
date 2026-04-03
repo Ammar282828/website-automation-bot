@@ -167,10 +167,10 @@ CAMERA: 100mm macro lens, f/8, focus-stacked for edge-to-edge sharpness. Color-a
         ecom_angle: `SCENE: Three-quarter angle product shot. Pure white (#FFFFFF) seamless background. Camera positioned at 45° to the front face, slightly elevated (20–25°), revealing the depth, profile, and side construction of the piece. This angle shows how the jewelry looks in three dimensions — the curve of a bangle, the height of a setting, the thickness of metalwork. Same even studio lighting with clean highlights.
 CAMERA: 100mm macro, f/8, focus-stacked. The viewer should feel they can reach in and pick up the piece.`,
 
-        ecom_detail: `SCENE: Extreme macro close-up. Camera is 1–3 cm from the most intricate area of the jewelry — the center stone and its setting, the finest filigree, or the most detailed metalwork. Fill the entire frame with this detail. White or neutral surface beneath. Razor-sharp focus on the subject with natural bokeh softening the edges. This shot reveals craftsmanship — individual prongs, stone facets, metal grain, pavé precision.
+        ecom_detail: `SCENE: Extreme macro close-up. Camera is 1–3 cm from the most intricate area of the jewelry — the center stone and its setting, the finest filigree, or the most detailed metalwork. Fill the entire frame with this detail. Pure white (#FFFFFF) background and surface beneath. Razor-sharp focus on the subject with natural bokeh softening the edges. This shot reveals craftsmanship — individual prongs, stone facets, metal grain, pavé precision.
 CAMERA: Dedicated macro lens at 1:1 magnification, f/5.6 for shallow depth, ring light for even illumination without harsh shadows. Shot so close the viewer can count individual stones.`,
 
-        ecom_flat: `SCENE: Overhead flat lay on pure white surface. Camera directly above (90° bird's eye). The jewelry is laid flat, centered, with its decorative face pointing up. For bangles/bracelets: circular shape fully visible. For necklaces: arranged in an elegant drape or gentle curve. For rings: face up, slightly angled. Even, shadowless lighting from a large overhead softbox. Clean, minimal, editorial.
+        ecom_flat: `SCENE: Overhead flat lay on pure white (#FFFFFF) surface and background. Camera directly above (90° bird's eye). The jewelry is laid flat, centered, with its decorative face pointing up. For bangles/bracelets: circular shape fully visible. For necklaces: arranged in an elegant drape or gentle curve. For rings: face up, slightly angled. Even, shadowless lighting from a large overhead softbox. Clean, minimal, editorial.
 CAMERA: 85mm, f/8, tripod-mounted directly overhead. Perfect symmetry in composition.`,
 
         ecom_stand: `SCENE: House of Mina brand display presentation. Look at the reference photo(s) to determine the jewelry type, then choose the CORRECT display:
@@ -180,13 +180,15 @@ CAMERA: 85mm, f/8, tripod-mounted directly overhead. Perfect symmetry in composi
 - Earrings: on a small padded earring card or low T-bar stand.
 - Maang tikka / headpieces: laid flat on a velvet tray or silk fabric.
 
-The stand/display is elegant and minimal, in matte cream, soft gold, or deep velvet. Background is warm ivory/cream with a hint of texture (linen or fine paper). Soft, warm window-style light from the upper left creates gentle shadows and a luxurious mood. The decorative face of the jewelry faces the camera. The display should look natural — the jewelry should sit the way it would in a real boutique.
+The stand/display is elegant and minimal, in matte cream, soft gold, or deep velvet. Background is pure white (#FFFFFF). Soft, warm window-style light from the upper left creates gentle shadows and a luxurious mood. The decorative face of the jewelry faces the camera. The display should look natural — the jewelry should sit the way it would in a real boutique.
 CAMERA: 85mm f/2.8, slightly shallow depth of field to separate the piece from the background. Warm color temperature (5800K).`,
 
-        ecom_group: `SCENE: Scale and context shot. The jewelry is placed on a pure white surface alongside a subtle, universally understood size reference — a single fresh rose petal, a small velvet pouch, or an elegant hand mirror. The reference object is secondary and slightly out of focus. The jewelry remains the hero. This shot communicates real-world scale and presence.
+        ecom_group: `SCENE: Scale and context shot. Pure white (#FFFFFF) background and surface. The jewelry is placed alongside a subtle, universally understood size reference — a single fresh rose petal, a small velvet pouch, or an elegant hand mirror. The reference object is secondary and slightly out of focus. The jewelry remains the hero. This shot communicates real-world scale and presence.
 CAMERA: 85mm, f/4, with the jewelry in sharp focus and the reference object in soft focus behind or beside it.`,
 
         model_wrist: `SCENE: The jewelry is worn on the wrist/hand of a model. For bangles and bracelets: worn snugly on the wrist, sitting flush against skin with the outer decorative face toward the camera. For rings: worn on the ring finger, hand relaxed.
+
+FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the body, how much it slides or grips, the gap between jewelry and skin, the way it drapes or hangs under gravity. A loose bangle must look loose; a snug cuff must look snug. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, natural skin texture, clean manicure with nude or soft pink nails
@@ -200,6 +202,8 @@ LIGHTING: Single soft key light from above-left, warm neutral blurred backdrop (
 
         model_neck: `SCENE: The jewelry is worn around the neck of a model. The necklace or choker sits naturally on the collarbone/décolletage area.
 
+FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the neck, the drape length, the gap between the piece and skin, whether it sits high on the throat or low on the collarbone. Match the reference fit precisely.
+
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, natural skin, elegant bone structure
 - Head tilted very slightly to one side, chin slightly lifted
@@ -211,6 +215,8 @@ LIGHTING: Soft, warm key light from above-right, gentle fill from the left. Warm
 
         model_ear: `SCENE: The earring is worn on the ear of a model. Close-up of the ear, jawline, and a hint of neck.
 
+FITTING: Study the reference photo(s) carefully. If the earring is shown being worn, replicate the EXACT fit — how it hangs, the drop length, whether it sits close to the lobe or dangles freely, and how it moves with gravity. Match the reference fit precisely.
+
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, clean skin, elegant jawline
 - Head turned slightly (three-quarter profile) to present the ear naturally
@@ -221,6 +227,8 @@ FRAMING: Tight crop on the ear and surrounding area. The earring is the clear he
 LIGHTING: Soft key light from the front-left, gentle rim light to separate from background. Warm blurred backdrop. 100mm f/2, very shallow depth — the earring is razor-sharp, everything else falls off softly.`,
 
         model_lifestyle: `SCENE: Lifestyle editorial shot. The model is wearing the jewelry in a warm, luxurious setting — think golden hour light, soft furnishings, or a beautiful window. The mood is aspirational, elegant, and distinctly South Asian-luxe.
+
+FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the body, the drape, the gap between jewelry and skin, the way it hangs under gravity. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, styled beautifully but not overly made up
@@ -273,6 +281,53 @@ app.post('/usage/reset', (_req, res) => {
     res.json({ reset: true });
 });
 app.get('/cost-rates', (_req, res) => res.json(COST_PER_IMAGE));
+
+// ── Scrape product images from URL ─────────────────────────────────────────
+app.post('/scrape-url', async (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'No URL provided.' });
+
+    try {
+        // Extract product handle from Shopify URL: /products/{handle}
+        const parsed = new URL(url);
+        const match = parsed.pathname.match(/\/products\/([^/?#]+)/);
+        if (!match) return res.status(400).json({ error: 'Could not find product handle in URL. Expected format: /products/{product-name}' });
+
+        const handle = match[1];
+        const jsonUrl = `${parsed.origin}/products/${handle}.json`;
+        console.log(`[Scrape] Fetching ${jsonUrl}`);
+
+        const response = await fetch(jsonUrl);
+        if (!response.ok) return res.status(400).json({ error: `Failed to fetch product JSON (HTTP ${response.status})` });
+
+        const data = await response.json();
+        const product = data.product;
+        if (!product) return res.status(400).json({ error: 'No product data found.' });
+
+        const images = product.images || [];
+        if (images.length === 0) return res.status(400).json({ error: 'Product has no images.' });
+
+        console.log(`[Scrape] "${product.title}" — ${images.length} image(s)`);
+
+        // Download each image and convert to base64
+        const results = await Promise.all(images.map(async (img, i) => {
+            const imgRes = await fetch(img.src);
+            if (!imgRes.ok) return null;
+            const buf = Buffer.from(await imgRes.arrayBuffer());
+            const ext = path.extname(new URL(img.src).pathname).toLowerCase() || '.jpg';
+            const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+            const mime = mimeMap[ext] || 'image/jpeg';
+            return { base64: buf.toString('base64'), mimeType: mime, name: `${handle}_${i + 1}${ext}`, width: img.width, height: img.height };
+        }));
+
+        const valid = results.filter(Boolean);
+        console.log(`[Scrape] Downloaded ${valid.length} image(s)`);
+        res.json({ success: true, title: product.title, images: valid });
+    } catch (err) {
+        console.error('[Scrape Error]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // ── Serve generated files from disk ─────────────────────────────────────────
 app.get('/file', (req, res) => {
@@ -421,6 +476,7 @@ app.get('/batch', async (req, res) => {
     batchCancelled = false;
 
     send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds });
+    console.log(`[Batch] Starting — ${productDirs.length} product(s), shots: ${shotIds.join(', ')}`);
 
     for (const { name: productName, fullPath: productFolder } of productDirs) {
         if (batchCancelled) {
@@ -429,6 +485,7 @@ app.get('/batch', async (req, res) => {
         }
 
         send({ type: 'product_start', product: productName, productFolder });
+        console.log(`\n[Product] ▶ ${productName}`);
 
         try {
             const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
@@ -458,6 +515,7 @@ app.get('/batch', async (req, res) => {
             const anchorShot = SHOT_CATALOG[anchorId];
 
             send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
+            console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
             try {
                 const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
                 anchorRef = { base64: b64, mimeType: 'image/png' };
@@ -465,8 +523,10 @@ app.get('/batch', async (req, res) => {
                 fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
                 send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: outPath });
                 send({ type: 'usage', usage: usageStats });
+                console.log(`  [Shot] ✓ ${anchorShot.label} → ${outPath}`);
             } catch (err) {
                 send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
+                console.error(`  [Shot] ✗ ${anchorShot.label}: ${err.message}`);
             }
 
             if (batchCancelled) {
@@ -484,6 +544,7 @@ app.get('/batch', async (req, res) => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) continue;
                 send({ type: 'angle_start', product: productName, angle: shotId, label: shot.label });
+                console.log(`  [Shot] Generating: ${shot.label} (${shotId}) via ${provider}...`);
             }
 
             const parallelTasks = remaining.map(shotId => {
@@ -495,8 +556,12 @@ app.get('/batch', async (req, res) => {
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
                         send({ type: 'angle_done', product: productName, angle: shotId, label: shot.label, savedTo: p });
                         send({ type: 'usage', usage: usageStats });
+                        console.log(`  [Shot] ✓ ${shot.label} → ${p}`);
                     })
-                    .catch(err => send({ type: 'angle_error', product: productName, angle: shotId, message: err.message }));
+                    .catch(err => {
+                        send({ type: 'angle_error', product: productName, angle: shotId, message: err.message });
+                        console.error(`  [Shot] ✗ ${shot.label}: ${err.message}`);
+                    });
             });
 
             await Promise.all(parallelTasks);
@@ -506,6 +571,7 @@ app.get('/batch', async (req, res) => {
         }
 
         send({ type: 'product_done', product: productName });
+        console.log(`[Product] ✓ Done: ${productName}`);
 
         if (batchCancelled) {
             send({ type: 'cancelled', message: 'Batch cancelled by user.' });
@@ -517,7 +583,10 @@ app.get('/batch', async (req, res) => {
     activeBatchId = null;
     batchCancelled = false;
 
-    if (!wasCancelled) send({ type: 'done' });
+    if (!wasCancelled) {
+        send({ type: 'done' });
+        console.log(`\n[Batch] Complete — $${usageStats.session.total.cost.toFixed(3)} spent, ${usageStats.session.total.images} images`);
+    }
     res.end();
 });
 
@@ -816,14 +885,26 @@ async function makeSquare(buffer) {
 async function toJpeg(filePathOrName, buffer) {
     const ext = path.extname(filePathOrName).toLowerCase();
     if (ext === '.heic' || ext === '.heif') {
-        const tmpIn  = path.join(os.tmpdir(), `heic-in-${Date.now()}.heic`);
-        const tmpOut = path.join(os.tmpdir(), `heic-out-${Date.now()}.jpg`);
+        // Try sips first (macOS native), then sharp as fallback
+        const tmpDir = path.join(__dirname, '.tmp');
+        fs.mkdirSync(tmpDir, { recursive: true });
+        const stamp  = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const tmpIn  = path.join(tmpDir, `heic-in-${stamp}.heic`);
+        const tmpOut = path.join(tmpDir, `heic-out-${stamp}.jpg`);
         try {
             fs.writeFileSync(tmpIn, buffer);
             await new Promise((resolve, reject) => {
                 execFile('sips', ['-s', 'format', 'jpeg', tmpIn, '--out', tmpOut], err => err ? reject(err) : resolve());
             });
             return fs.readFileSync(tmpOut);
+        } catch (sipsErr) {
+            console.warn(`[HEIC] sips failed (${sipsErr.message}), trying sharp...`);
+            try {
+                return await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+            } catch (sharpErr) {
+                console.error(`[HEIC] sharp also failed (${sharpErr.message}), skipping file`);
+                throw new Error(`Cannot convert HEIC file: ${filePathOrName}`);
+            }
         } finally {
             if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
             if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
