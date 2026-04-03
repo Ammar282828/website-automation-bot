@@ -554,6 +554,104 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
     }
 });
 
+// ── WhatsApp caption generation ────────────────────────────────────────────
+app.post('/generate-caption', upload.array('images[]', 10), async (req, res) => {
+    const productName   = (req.body.productName || '').trim() || 'this piece';
+    const extraContext   = (req.body.extraContext || '').trim();
+
+    // Build image inputs from uploaded files (if any)
+    let imageInputs = [];
+    if (req.files && req.files.length > 0) {
+        imageInputs = await Promise.all(req.files.map(async (f) => {
+            const buf = await toJpeg(f.originalname || '', f.buffer);
+            return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
+        }));
+    }
+
+    // Also accept base64 images from JSON body (for generated images)
+    const jsonImages = req.body.captionImages ? JSON.parse(req.body.captionImages) : [];
+    for (const img of jsonImages) {
+        if (img.b64) imageInputs.push({ base64: img.b64, mimeType: 'image/png' });
+    }
+
+    const captionPrompt = `You are the copywriter for House of Mina (houseofmina.store), a luxury South Asian jewelry brand based in Karachi. You write WhatsApp community posts to showcase new jewelry pieces.
+
+BRAND VOICE & STYLE:
+- Sophisticated yet accessible, warm, elegant, aspirational
+- Short punchy sentences. Conversational but elevated
+- Open with a hook that creates desire (e.g. "Meet your new obsession.", "Some pieces just speak for themselves.", "This one's going to turn heads.")
+- Highlight the key visual feature of THIS specific piece (describe what you actually see in the image — the stone color, the design style, the sparkle)
+- Use WhatsApp bold formatting with asterisks for key specs: *925 Sterling Silver*, *Gold Plated*, etc.
+- End with a soft-launch / urgency line, then the standard CTA
+
+DEFAULT MATERIAL SPECS (use these unless the image clearly shows otherwise or extra context overrides):
+- 925 Sterling Silver with White Rhodium / Gold Plating
+- Cubic Zirconia stones
+- Simulated coloured stones (e.g. *simulated emeralds*, *simulated rubies*) — NOT certified/natural unless specified
+
+WHATSAPP FORMATTING RULES:
+- Use *asterisks* for bold (key specs, brand name)
+- Use _underscores_ for italic (rare, only for emphasis)
+- Line breaks between sections (hook / description / CTA)
+- Emojis only at the CTA section at the end
+- Keep the whole caption under 500 characters
+
+SAMPLE FOR REFERENCE (match this energy and structure):
+"Meet your new obsession. *A certified yellow sapphire. Brilliant zircon accents. 925 sterling silver*. A combination this stunning doesn't come along often — and at *House of Mina*, it's entirely yours. We're celebrating our soft launch with special introductory pricing. These pieces won't wait forever. 📩 DM to order 🇵🇰 Nationwide Delivery"
+
+CTA BLOCK (always end with this exact block):
+📩 DM to order
+🇵🇰 Nationwide Delivery
+
+${extraContext ? `EXTRA CONTEXT FROM THE USER: ${extraContext}\n` : ''}
+Now look at the jewelry image(s) provided and write ONE WhatsApp community caption for ${productName}. Output ONLY the caption text, nothing else — no quotes, no explanation, no markdown code blocks.`;
+
+    try {
+        let captionText;
+
+        if (geminiClient && imageInputs.length > 0) {
+            const parts = [
+                { text: captionPrompt },
+                ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+            ];
+            await acquireGeminiSlot();
+            try {
+                const response = await geminiClient.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: [{ parts }],
+                });
+                const resParts = response.candidates?.[0]?.content?.parts || [];
+                captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
+            } finally {
+                releaseGeminiSlot();
+            }
+        } else if (geminiClient) {
+            // Text-only (no images)
+            await acquireGeminiSlot();
+            try {
+                const response = await geminiClient.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: [{ parts: [{ text: captionPrompt }] }],
+                });
+                const resParts = response.candidates?.[0]?.content?.parts || [];
+                captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
+            } finally {
+                releaseGeminiSlot();
+            }
+        } else {
+            return res.status(500).json({ error: 'No AI provider available for caption generation.' });
+        }
+
+        // Clean up: remove wrapping quotes or code blocks if the model added them
+        captionText = captionText.replace(/^["'`]+|["'`]+$/g, '').replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '').trim();
+
+        res.json({ success: true, caption: captionText });
+    } catch (err) {
+        console.error('[Caption Error]', err?.message || err);
+        res.status(500).json({ error: err.message || 'Caption generation failed.' });
+    }
+});
+
 // ── Download ZIP endpoint ───────────────────────────────────────────────────
 app.post('/download-zip', async (req, res) => {
     const { images } = req.body;

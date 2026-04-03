@@ -760,6 +760,159 @@
       color: rgba(255,255,255,0.8);
     }
 
+    /* ── Image selection ── */
+    .result-card.selectable { cursor: pointer; position: relative; }
+    .result-card.selectable.selected { border-color: var(--gold); box-shadow: 0 0 0 2px var(--accent-bg); }
+    .select-check {
+      position: absolute;
+      top: 36px; right: 8px;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.85);
+      border: 2px solid var(--border2);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 5;
+      transition: all 0.15s;
+      pointer-events: none;
+    }
+    .result-card.selected .select-check {
+      background: var(--gold);
+      border-color: var(--gold);
+    }
+    .select-check svg {
+      width: 14px; height: 14px;
+      stroke: #fff;
+      stroke-width: 2.5;
+      fill: none;
+      opacity: 0;
+    }
+    .result-card.selected .select-check svg { opacity: 1; }
+
+    /* ── Selection toolbar ── */
+    .selection-toolbar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      background: var(--accent-bg);
+      border: 1px solid var(--gold);
+      border-radius: var(--radius);
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .selection-toolbar.visible { display: flex; }
+    .selection-toolbar .sel-count {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-right: auto;
+    }
+    .btn-sel-action {
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--gold);
+      background: var(--surface);
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .btn-sel-action:hover { background: var(--accent-bg2); }
+    .btn-sel-action.primary {
+      background: var(--gold);
+      color: #fff;
+      border-color: var(--gold);
+    }
+    .btn-sel-action.primary:hover { opacity: 0.88; }
+
+    /* ── Caption panel ── */
+    .caption-panel {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      padding: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-top: 12px;
+    }
+    .caption-panel.visible { display: flex; }
+    .caption-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .caption-panel-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .caption-panel-title span { font-size: 1rem; }
+    .caption-fields {
+      display: flex;
+      gap: 8px;
+    }
+    .caption-fields .field-input { flex: 1; }
+    .caption-output {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      font-size: 0.88rem;
+      line-height: 1.7;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      min-height: 80px;
+      font-family: inherit;
+      position: relative;
+    }
+    .caption-output.empty {
+      color: var(--muted2);
+      font-style: italic;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+    }
+    .caption-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-caption {
+      padding: 9px 16px;
+      border-radius: var(--radius-sm);
+      border: none;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .btn-caption.generate {
+      background: #075E54;
+      color: #fff;
+    }
+    .btn-caption.generate:hover { opacity: 0.88; }
+    .btn-caption.generate:disabled { background: #a0c4bf; cursor: wait; }
+    .btn-caption.copy {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text2);
+    }
+    .btn-caption.copy:hover { background: var(--border); }
+    .btn-caption.copy.copied {
+      background: var(--success-bg);
+      border-color: var(--success);
+      color: var(--success);
+    }
+
     /* pad bottom of page so content isn't hidden behind bar */
     body { padding-bottom: 48px; }
   </style>
@@ -867,9 +1020,38 @@
   <div id="results">
     <div class="results-header">
       <div class="results-title">Generated Shots</div>
-      <button class="btn-download-all" id="btn-download-all" style="display:none">Download All ZIP</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn-download-all" id="btn-select-toggle" style="display:none">Select Images</button>
+        <button class="btn-download-all" id="btn-download-all" style="display:none">Download All ZIP</button>
+      </div>
     </div>
+
+    <!-- Selection toolbar (appears when selecting) -->
+    <div class="selection-toolbar" id="selection-toolbar">
+      <span class="sel-count" id="sel-count">0 selected</span>
+      <button class="btn-sel-action" id="btn-select-all">Select All</button>
+      <button class="btn-sel-action" id="btn-sel-export">Export Selected ZIP</button>
+      <button class="btn-sel-action primary" id="btn-sel-caption">WhatsApp Caption</button>
+    </div>
+
     <div class="results-grid" id="results-grid"></div>
+
+    <!-- Caption panel -->
+    <div class="caption-panel" id="caption-panel">
+      <div class="caption-panel-header">
+        <div class="caption-panel-title"><span>💬</span> WhatsApp Caption</div>
+        <button class="clear-btn" id="btn-close-caption">Close</button>
+      </div>
+      <div class="caption-fields">
+        <input type="text" id="caption-product-name" class="field-input" placeholder="Product name (e.g. Emerald Tennis Bracelet)" />
+        <input type="text" id="caption-extra" class="field-input" placeholder="Extra details (e.g. certified stone, special price)" />
+      </div>
+      <div class="caption-actions">
+        <button class="btn-caption generate" id="btn-generate-caption">Generate Caption</button>
+        <button class="btn-caption copy" id="btn-copy-caption" style="display:none">Copy to Clipboard</button>
+      </div>
+      <div class="caption-output empty" id="caption-output">Select images and click "Generate Caption" to create a WhatsApp post</div>
+    </div>
   </div>
 
   <!-- ═══ BATCH LOG & RESULTS ═══ -->
@@ -917,6 +1099,8 @@
   let selectedProvider = 'gemini';
   let generatedImages = [];
   let genState = { files: [], customInstruction: '' };
+  let selectionMode = false;
+  let selectedResultIndices = new Set();
 
   const PRESETS = {
     quick:      ['ecom_hero', 'ecom_detail'],
@@ -1180,11 +1364,16 @@
   btnClearAll.addEventListener('click', () => {
     selectedFiles = [];
     generatedImages = [];
+    selectedResultIndices.clear();
+    selectionMode = false;
     renderPreviews();
     hideError();
     resultsEl.classList.remove('visible');
     resultsGrid.innerHTML = '';
     btnDownloadAll.style.display = 'none';
+    document.getElementById('btn-select-toggle').style.display = 'none';
+    selectionToolbar.classList.remove('visible');
+    captionPanel.classList.remove('visible');
   });
 
   // ── Generate ──────────────────────────────────────────────────────────────
@@ -1225,14 +1414,18 @@
   function renderResults(results) {
     resultsGrid.innerHTML = '';
     generatedImages = [];
+    selectedResultIndices.clear();
+    selectionMode = false;
+    updateSelectionUI();
 
     if (results.shots?.length) {
-      results.shots.forEach(({ id, label, category, data }) => {
+      results.shots.forEach(({ id, label, category, data }, idx) => {
         generatedImages.push({ name: `${id}.png`, b64: data });
         const labelCls = LABEL_CLASS[category] || 'label-ecommerce';
         const card = makeResultCard(
           `data:image/png;base64,${data}`, label, labelCls, id, data,
-          (card, btn) => retryShot(id, card, btn)
+          (card, btn) => retryShot(id, card, btn),
+          idx
         );
         resultsGrid.appendChild(card);
       });
@@ -1240,15 +1433,22 @@
 
     if (generatedImages.length > 1) {
       btnDownloadAll.style.display = '';
+      document.getElementById('btn-select-toggle').style.display = '';
     }
 
     resultsEl.classList.add('visible');
     resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  function makeResultCard(src, label, labelCls, key, b64, onRetry = null) {
+  function makeResultCard(src, label, labelCls, key, b64, onRetry = null, cardIndex = 0) {
     const card = document.createElement('div');
     card.className = 'result-card';
+    card.dataset.cardIndex = cardIndex;
+
+    // Selection checkbox overlay
+    const selCheck = document.createElement('div');
+    selCheck.className = 'select-check';
+    selCheck.innerHTML = '<svg viewBox="0 0 14 14"><polyline points="2.5 7 5.5 10 11.5 4"></polyline></svg>';
 
     const labelEl = document.createElement('div');
     labelEl.className = `result-card-label ${labelCls}`;
@@ -1257,6 +1457,12 @@
     const img = document.createElement('img');
     img.src = src;
     img.alt = label;
+
+    // Click on image area toggles selection when in selection mode
+    img.addEventListener('click', () => {
+      if (!selectionMode) return;
+      toggleCardSelection(card, cardIndex);
+    });
 
     const actions = document.createElement('div');
     actions.className = 'result-card-actions';
@@ -1282,7 +1488,7 @@
       actions.appendChild(retryBtn);
     }
 
-    card.append(labelEl, img, actions);
+    card.append(selCheck, labelEl, img, actions);
     return card;
   }
 
@@ -1643,6 +1849,181 @@
   // Patch existing handlers to also update cost bar from responses
   const _origRenderResults = renderResults;
   // We hook into fetch responses instead — see generate handler
+
+  // ── Image selection & export ──────────────────────────────────────────────
+  const btnSelectToggle   = document.getElementById('btn-select-toggle');
+  const selectionToolbar  = document.getElementById('selection-toolbar');
+  const selCountEl        = document.getElementById('sel-count');
+  const btnSelectAll      = document.getElementById('btn-select-all');
+  const btnSelExport      = document.getElementById('btn-sel-export');
+  const btnSelCaption     = document.getElementById('btn-sel-caption');
+  const captionPanel      = document.getElementById('caption-panel');
+  const captionOutput     = document.getElementById('caption-output');
+  const btnGenerateCaption = document.getElementById('btn-generate-caption');
+  const btnCopyCaption    = document.getElementById('btn-copy-caption');
+  const btnCloseCaption   = document.getElementById('btn-close-caption');
+  const captionProductName = document.getElementById('caption-product-name');
+  const captionExtra      = document.getElementById('caption-extra');
+
+  btnSelectToggle.addEventListener('click', () => {
+    selectionMode = !selectionMode;
+    if (!selectionMode) selectedResultIndices.clear();
+    updateSelectionUI();
+  });
+
+  function toggleCardSelection(card, index) {
+    if (selectedResultIndices.has(index)) {
+      selectedResultIndices.delete(index);
+      card.classList.remove('selected');
+    } else {
+      selectedResultIndices.add(index);
+      card.classList.add('selected');
+    }
+    updateSelectionUI();
+  }
+
+  function updateSelectionUI() {
+    btnSelectToggle.textContent = selectionMode ? 'Done Selecting' : 'Select Images';
+
+    // Toggle selectable class on all cards
+    document.querySelectorAll('#results-grid .result-card').forEach(c => {
+      c.classList.toggle('selectable', selectionMode);
+      if (!selectionMode) c.classList.remove('selected');
+    });
+
+    selectionToolbar.classList.toggle('visible', selectionMode);
+    selCountEl.textContent = `${selectedResultIndices.size} selected`;
+
+    const allSelected = generatedImages.length > 0 && selectedResultIndices.size === generatedImages.length;
+    btnSelectAll.textContent = allSelected ? 'Deselect All' : 'Select All';
+  }
+
+  btnSelectAll.addEventListener('click', () => {
+    const allSelected = selectedResultIndices.size === generatedImages.length;
+    if (allSelected) {
+      selectedResultIndices.clear();
+      document.querySelectorAll('#results-grid .result-card').forEach(c => c.classList.remove('selected'));
+    } else {
+      generatedImages.forEach((_, i) => selectedResultIndices.add(i));
+      document.querySelectorAll('#results-grid .result-card').forEach(c => c.classList.add('selected'));
+    }
+    updateSelectionUI();
+  });
+
+  // Export selected as ZIP
+  btnSelExport.addEventListener('click', async () => {
+    if (selectedResultIndices.size === 0) return;
+    const selected = [...selectedResultIndices].map(i => generatedImages[i]).filter(Boolean);
+    try {
+      const res = await fetch('/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: selected.map(i => ({ name: i.name, data: i.b64 })) }),
+      });
+      if (!res.ok) throw new Error('ZIP generation failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'house_of_mina_selected.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showError('Failed to export: ' + err.message);
+    }
+  });
+
+  // Open caption panel
+  btnSelCaption.addEventListener('click', () => {
+    captionPanel.classList.add('visible');
+    captionPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  btnCloseCaption.addEventListener('click', () => {
+    captionPanel.classList.remove('visible');
+  });
+
+  // Generate WhatsApp caption
+  btnGenerateCaption.addEventListener('click', async () => {
+    const selected = [...selectedResultIndices].map(i => generatedImages[i]).filter(Boolean);
+    if (selected.length === 0) {
+      captionOutput.className = 'caption-output empty';
+      captionOutput.textContent = 'Please select at least one image first';
+      return;
+    }
+
+    btnGenerateCaption.disabled = true;
+    btnGenerateCaption.textContent = 'Generating...';
+    captionOutput.className = 'caption-output empty';
+    captionOutput.textContent = 'Writing your WhatsApp caption...';
+
+    try {
+      // Send first selected image as base64 (limit to 2 to keep request reasonable)
+      const imagesToSend = selected.slice(0, 2);
+
+      const formData = new FormData();
+      formData.append('productName', captionProductName.value.trim() || 'this piece');
+      formData.append('extraContext', captionExtra.value.trim());
+
+      // Convert base64 images to blobs and attach
+      for (let i = 0; i < imagesToSend.length; i++) {
+        const byteString = atob(imagesToSend[i].b64);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let j = 0; j < byteString.length; j++) ia[j] = byteString.charCodeAt(j);
+        const blob = new Blob([ab], { type: 'image/png' });
+        formData.append('images[]', blob, imagesToSend[i].name);
+      }
+
+      const res = await fetch('/generate-caption', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        captionOutput.className = 'caption-output empty';
+        captionOutput.textContent = data.error || 'Caption generation failed.';
+        return;
+      }
+
+      captionOutput.className = 'caption-output';
+      captionOutput.textContent = data.caption;
+      btnCopyCaption.style.display = '';
+    } catch (err) {
+      captionOutput.className = 'caption-output empty';
+      captionOutput.textContent = 'Error: ' + err.message;
+    } finally {
+      btnGenerateCaption.disabled = false;
+      btnGenerateCaption.textContent = 'Generate Caption';
+    }
+  });
+
+  // Copy caption to clipboard
+  btnCopyCaption.addEventListener('click', async () => {
+    const text = captionOutput.textContent;
+    if (!text || captionOutput.classList.contains('empty')) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      btnCopyCaption.textContent = 'Copied!';
+      btnCopyCaption.classList.add('copied');
+      setTimeout(() => {
+        btnCopyCaption.textContent = 'Copy to Clipboard';
+        btnCopyCaption.classList.remove('copied');
+      }, 2000);
+    } catch (e) {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btnCopyCaption.textContent = 'Copied!';
+      btnCopyCaption.classList.add('copied');
+      setTimeout(() => {
+        btnCopyCaption.textContent = 'Copy to Clipboard';
+        btnCopyCaption.classList.remove('copied');
+      }, 2000);
+    }
+  });
 
   // ── Init ──────────────────────────────────────────────────────────────────
   loadCatalog();
