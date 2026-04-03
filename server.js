@@ -617,7 +617,7 @@ Now look at the jewelry image(s) provided and write ONE WhatsApp community capti
             await acquireGeminiSlot();
             try {
                 const response = await geminiClient.models.generateContent({
-                    model: 'gemini-3-pro-image-preview',
+                    model: 'gemini-3.1-pro-preview',
                     contents: [{ parts }],
                 });
                 const resParts = response.candidates?.[0]?.content?.parts || [];
@@ -630,7 +630,7 @@ Now look at the jewelry image(s) provided and write ONE WhatsApp community capti
             await acquireGeminiSlot();
             try {
                 const response = await geminiClient.models.generateContent({
-                    model: 'gemini-3-pro-image-preview',
+                    model: 'gemini-3.1-pro-preview',
                     contents: [{ parts: [{ text: captionPrompt }] }],
                 });
                 const resParts = response.candidates?.[0]?.content?.parts || [];
