@@ -3,117 +3,145 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Jewelry Pipeline</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <title>House of Mina — Shot Pipeline</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    /* House of Mina brand fonts — Newsreader (serif headings) + Red Hat Text (sans body) */
+    @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,200;0,400;0,600;0,700;1,200;1,400&family=Red+Hat+Text:wght@300;400;500;600;700&display=swap');
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #080809;
-      --surface:   #111113;
-      --surface2:  #18181b;
-      --border:    #232326;
-      --border2:   #2e2e33;
-      --accent:    #a78bfa;
-      --accent-d:  #7c3aed;
-      --accent2:   #38bdf8;
-      --text:      #f4f4f5;
-      --muted:     #71717a;
-      --muted2:    #52525b;
-      --success:   #34d399;
-      --danger:    #f87171;
-      --radius:    14px;
+      --bg:        #FFFFFF;
+      --surface:   #FFFFFF;
+      --surface2:  #F7F5F3;
+      --border:    #E6E6E6;
+      --border2:   #D6D3D1;
+      --accent:    #3A0000;
+      --accent-l:  #5C1A1A;
+      --accent-bg: #F5EDED;
+      --accent-bg2:#FAF5F5;
+      --text:      #000000;
+      --text2:     #3A3A3A;
+      --muted:     #78716C;
+      --muted2:    #A8A29E;
+      --success:   #006400;
+      --success-bg:#F0FDF4;
+      --danger:    #8B0000;
+      --danger-bg: #FEF2F2;
+      --gold:      #3A0000;
+      --gold-light:#5C1A1A;
+      --radius:    12px;
       --radius-sm: 8px;
+      --shadow:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 6px rgba(0,0,0,0.05), 0 2px 4px rgba(0,0,0,0.04);
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: 'Inter', -apple-system, sans-serif;
+      font-family: 'Red Hat Text', -apple-system, sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 48px 20px 100px;
+      padding: 40px 20px 100px;
     }
 
     /* ── Header ── */
     header {
       text-align: center;
-      margin-bottom: 48px;
+      margin-bottom: 40px;
     }
-    .logo {
+    .brand {
       display: inline-flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 12px;
+      margin-bottom: 18px;
     }
-    .logo-icon {
-      width: 36px; height: 36px;
-      background: linear-gradient(135deg, var(--accent-d), var(--accent));
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.1rem;
-    }
-    .logo-text {
-      font-size: 1.1rem;
-      font-weight: 600;
-      letter-spacing: -0.3px;
-      color: var(--text);
+    .brand-logo {
+      height: 28px;
+      width: auto;
     }
     header h1 {
-      font-size: 2.4rem;
-      font-weight: 700;
-      letter-spacing: -1px;
-      line-height: 1.1;
-      background: linear-gradient(135deg, #fff 40%, #a78bfa);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 10px;
+      font-family: 'Newsreader', Georgia, serif;
+      font-size: 1.7rem;
+      font-weight: 400;
+      font-style: italic;
+      letter-spacing: -0.3px;
+      line-height: 1.3;
+      color: var(--text);
+      margin-bottom: 8px;
     }
     header p {
       color: var(--muted);
-      font-size: 0.95rem;
+      font-size: 0.88rem;
       font-weight: 400;
     }
 
-    /* ── Layout ── */
-    .stack { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 760px; }
-
-    /* ── Tabs ── */
-    .tabs {
+    /* ── Main container ── */
+    .container {
       width: 100%;
+      max-width: 720px;
       display: flex;
-      gap: 2px;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    /* ── Card sections ── */
+    .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 4px;
+      padding: 24px;
+      position: relative;
     }
-    .tab-btn {
+    .card:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+    .card:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+    .card + .card { border-top: none; }
+
+    .card-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    /* ── Mode tabs (Single / Batch) ── */
+    .mode-tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--surface2);
+      border-radius: var(--radius);
+      padding: 3px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+    }
+    .mode-tab {
       flex: 1;
-      padding: 10px 14px;
-      border-radius: 10px;
+      padding: 9px 14px;
+      border-radius: 9px;
       border: none;
       background: transparent;
       color: var(--muted);
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
       font-family: inherit;
-      letter-spacing: -0.1px;
     }
-    .tab-btn.active { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
-    .tab-panel { display: none; width: 100%; }
-    .tab-panel.active { display: contents; }
+    .mode-tab.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+    .mode-panel { display: none; }
+    .mode-panel.active { display: block; }
 
     /* ── Drop zone ── */
     .drop-zone {
       width: 100%;
-      border: 1.5px dashed var(--border2);
+      border: 2px dashed var(--border2);
       border-radius: var(--radius);
       cursor: pointer;
       transition: border-color 0.2s, background 0.2s;
@@ -121,51 +149,45 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      padding: 48px 24px;
+      gap: 6px;
+      padding: 40px 24px;
       position: relative;
-      background: var(--surface);
+      background: var(--surface2);
     }
     .drop-zone:hover, .drop-zone.drag-over {
-      border-color: var(--accent);
-      background: rgba(167,139,250,0.04);
+      border-color: var(--gold);
+      background: var(--accent-bg2);
     }
     .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .drop-icon { font-size: 2rem; margin-bottom: 4px; }
-    .drop-zone h3 { font-size: 0.95rem; font-weight: 600; color: var(--text); }
-    .drop-zone p { font-size: 0.82rem; color: var(--muted); }
+    .drop-zone h3 { font-size: 0.9rem; font-weight: 600; color: var(--text); }
+    .drop-zone p { font-size: 0.8rem; color: var(--muted); }
     .drop-hint {
-      margin-top: 8px;
-      font-size: 0.75rem;
+      margin-top: 6px;
+      font-size: 0.72rem;
       color: var(--muted2);
-      background: var(--surface2);
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 20px;
-      padding: 4px 12px;
+      padding: 3px 12px;
     }
 
-    /* ── Image previews grid ── */
-    #previews {
-      width: 100%;
-      display: none;
-      flex-direction: column;
-      gap: 12px;
-    }
+    /* ── Image previews ── */
+    #previews { width: 100%; display: none; flex-direction: column; gap: 10px; }
     #previews.visible { display: flex; }
     .previews-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
-    .previews-header span { font-size: 0.82rem; color: var(--muted); font-weight: 500; }
+    .previews-header span { font-size: 0.8rem; color: var(--muted); font-weight: 500; }
     .previews-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+      gap: 8px;
     }
     .preview-card {
       position: relative;
-      border-radius: 10px;
+      border-radius: 8px;
       overflow: hidden;
       border: 1px solid var(--border);
       background: var(--surface2);
@@ -174,122 +196,180 @@
     .preview-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .preview-card .remove-btn {
       position: absolute;
-      top: 5px; right: 5px;
-      width: 22px; height: 22px;
-      background: rgba(0,0,0,0.7);
+      top: 4px; right: 4px;
+      width: 20px; height: 20px;
+      background: rgba(0,0,0,0.6);
       border: none;
       border-radius: 50%;
       color: #fff;
-      font-size: 0.7rem;
+      font-size: 0.65rem;
       cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      backdrop-filter: blur(4px);
       transition: background 0.15s;
     }
     .preview-card .remove-btn:hover { background: var(--danger); }
-    .preview-card .angle-badge {
-      position: absolute;
-      bottom: 5px; left: 5px;
-      font-size: 0.62rem;
-      font-weight: 600;
-      background: rgba(0,0,0,0.7);
-      color: var(--accent);
-      padding: 2px 7px;
-      border-radius: 20px;
-      backdrop-filter: blur(4px);
-    }
     .add-more-card {
-      border-radius: 10px;
-      border: 1.5px dashed var(--border2);
-      background: var(--surface);
+      border-radius: 8px;
+      border: 2px dashed var(--border2);
+      background: var(--surface2);
       aspect-ratio: 1/1;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      gap: 4px;
+      gap: 2px;
       cursor: pointer;
       position: relative;
-      transition: border-color 0.15s, background 0.15s;
+      transition: border-color 0.15s;
     }
-    .add-more-card:hover { border-color: var(--accent); background: rgba(167,139,250,0.04); }
+    .add-more-card:hover { border-color: var(--gold); }
     .add-more-card input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .add-more-card span { font-size: 1.4rem; color: var(--muted); }
-    .add-more-card p { font-size: 0.7rem; color: var(--muted2); }
+    .add-more-card span { font-size: 1.2rem; color: var(--muted); }
+    .add-more-card p { font-size: 0.65rem; color: var(--muted2); }
 
-    /* ── Settings ── */
-    .settings { width: 100%; display: flex; flex-direction: column; gap: 14px; }
-    .settings-row { display: flex; gap: 12px; }
-    .settings-row > * { flex: 1; }
+    /* ── Shot selector ── */
+    .shot-category {
+      margin-bottom: 20px;
+    }
+    .shot-category:last-child { margin-bottom: 0; }
+    .shot-category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .shot-category-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text2);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .shot-category-title .cat-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .cat-ecommerce .cat-dot { background: #3A0000; }
+    .cat-model .cat-dot { background: #8B4513; }
+    .cat-marble .cat-dot { background: #78716C; }
 
+    .select-all-btn {
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .select-all-btn:hover { color: var(--text); background: var(--surface2); }
+
+    .shot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 8px;
+    }
+
+    .shot-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .shot-option:hover { border-color: var(--border2); background: var(--surface2); }
+    .shot-option.checked { border-color: var(--gold); background: var(--accent-bg2); }
+
+    .shot-checkbox {
+      width: 18px; height: 18px;
+      border-radius: 4px;
+      border: 2px solid var(--border2);
+      flex-shrink: 0;
+      margin-top: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      background: var(--surface);
+    }
+    .shot-option.checked .shot-checkbox {
+      background: var(--gold);
+      border-color: var(--gold);
+    }
+    .shot-checkbox svg {
+      width: 12px; height: 12px;
+      stroke: #fff;
+      stroke-width: 2.5;
+      fill: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .shot-option.checked .shot-checkbox svg { opacity: 1; }
+
+    .shot-info { flex: 1; min-width: 0; }
+    .shot-name { font-size: 0.82rem; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .shot-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.4; margin-top: 2px; }
+
+    /* ── Custom instruction ── */
     .field { display: flex; flex-direction: column; gap: 6px; }
     .field-label {
       font-size: 0.72rem;
       font-weight: 600;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
     }
-
-    .mode-group { display: flex; gap: 8px; }
-    .mode-btn {
-      flex: 1;
-      padding: 11px 8px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 0.82rem;
-      font-weight: 500;
-      transition: all 0.15s;
-      text-align: center;
-      font-family: inherit;
-    }
-    .mode-btn .mode-icon { display: block; font-size: 1.2rem; margin-bottom: 3px; }
-    .mode-btn:hover { border-color: var(--accent); color: var(--text); }
-    .mode-btn.active { border-color: var(--accent); background: rgba(167,139,250,0.1); color: var(--text); }
-
     .field-input {
       width: 100%;
-      background: var(--surface);
+      background: var(--surface2);
       border: 1px solid var(--border);
       color: var(--text);
       border-radius: var(--radius-sm);
-      padding: 11px 14px;
-      font-size: 0.88rem;
+      padding: 10px 14px;
+      font-size: 0.85rem;
       outline: none;
       transition: border-color 0.2s;
       font-family: inherit;
     }
     .field-input::placeholder { color: var(--muted2); }
-    .field-input:focus { border-color: var(--accent); }
+    .field-input:focus { border-color: var(--gold); }
 
-    /* ── Generate button ── */
+    /* ── Buttons ── */
     .btn-generate {
       width: 100%;
-      padding: 15px;
-      font-size: 0.95rem;
+      padding: 14px;
+      font-size: 0.92rem;
       font-weight: 600;
       border-radius: var(--radius);
       border: none;
-      background: linear-gradient(135deg, var(--accent-d), var(--accent));
+      background: #3A0000;
       color: #fff;
       cursor: pointer;
       transition: opacity 0.2s, transform 0.1s;
-      letter-spacing: -0.2px;
       font-family: inherit;
-      position: relative;
-      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(58,0,0,0.2);
     }
-    .btn-generate::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: rgba(255,255,255,0);
-      transition: background 0.2s;
+    .btn-generate:not(:disabled):hover { opacity: 0.88; }
+    .btn-generate:disabled { background: #C4A8A8; cursor: not-allowed; box-shadow: none; }
+    .btn-generate.loading { background: #5C1A1A; cursor: wait; }
+
+    .shot-count-badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--gold);
+      background: var(--accent-bg);
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: 8px;
     }
-    .btn-generate:not(:disabled):hover::after { background: rgba(255,255,255,0.06); }
-    .btn-generate:disabled { opacity: 0.3; cursor: not-allowed; }
-    .btn-generate.loading { opacity: 0.8; cursor: wait; }
 
     /* ── Progress ── */
     #progress { width: 100%; display: none; }
@@ -298,67 +378,57 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 20px 22px;
+      padding: 18px 20px;
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
     }
     .spinner {
-      width: 20px; height: 20px;
-      border: 2.5px solid var(--border2);
-      border-top-color: var(--accent);
+      width: 18px; height: 18px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--gold);
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
       flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .progress-text { font-size: 0.88rem; color: var(--muted); }
+    .progress-text { font-size: 0.85rem; color: var(--muted); }
     .progress-text strong { color: var(--text); font-weight: 600; }
-    .progress-steps {
-      margin-left: auto;
-      display: flex;
-      gap: 6px;
-    }
+    .progress-steps { margin-left: auto; display: flex; gap: 5px; }
     .step-dot {
-      width: 8px; height: 8px;
+      width: 7px; height: 7px;
       border-radius: 50%;
-      background: var(--border2);
+      background: var(--border);
       transition: background 0.3s;
     }
-    .step-dot.active { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+    .step-dot.active { background: var(--gold); animation: pulse 1s ease-in-out infinite; }
     .step-dot.done   { background: var(--success); animation: none; }
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
     /* ── Results ── */
-    #results { width: 100%; display: none; flex-direction: column; gap: 20px; }
+    #results { width: 100%; display: none; flex-direction: column; gap: 16px; }
     #results.visible { display: flex; }
 
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
     .results-title {
       font-size: 0.72rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .results-title::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
     }
 
-    .angles-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    .angles-grid .result-card.detail-card {
-      grid-column: 1 / -1;
-      max-width: 50%;
-      margin: 0 auto;
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
     }
     @media (max-width: 540px) {
-      .angles-grid { grid-template-columns: 1fr; }
-      .angles-grid .result-card.detail-card { max-width: 100%; }
+      .results-grid { grid-template-columns: 1fr; }
     }
 
     .result-card {
@@ -367,366 +437,506 @@
       border-radius: var(--radius);
       overflow: hidden;
       transition: border-color 0.2s;
+      box-shadow: var(--shadow);
     }
     .result-card:hover { border-color: var(--border2); }
     .result-card-label {
-      padding: 10px 14px;
-      font-size: 0.7rem;
+      padding: 8px 12px;
+      font-size: 0.68rem;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--accent2);
+      letter-spacing: 0.08em;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       gap: 6px;
     }
-    .result-card-label.model-label { color: var(--accent); }
+    .label-ecommerce { color: #3A0000; background: #FAF5F5; }
+    .label-model { color: #8B4513; background: #FBF7F4; }
+    .label-marble { color: #78716C; background: #F7F5F3; }
+
     .result-card img {
       width: 100%;
       aspect-ratio: 1/1;
       display: block;
       object-fit: cover;
-      transition: opacity 0.2s;
     }
     .result-card-actions {
-      padding: 10px 12px;
+      padding: 8px 10px;
       display: flex;
       gap: 6px;
     }
     .btn-dl {
       flex: 1;
-      padding: 9px;
+      padding: 8px;
       border-radius: var(--radius-sm);
       border: none;
-      background: rgba(167,139,250,0.15);
-      color: var(--accent);
-      font-size: 0.78rem;
+      background: var(--surface2);
+      color: var(--text2);
+      font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
       font-family: inherit;
     }
-    .btn-dl:hover { background: rgba(167,139,250,0.25); }
-
-    /* ── Retry button ── */
+    .btn-dl:hover { background: var(--border); }
     .btn-retry {
-      padding: 9px 12px;
+      padding: 8px 10px;
       border-radius: var(--radius-sm);
       border: none;
-      background: rgba(56,189,248,0.1);
-      color: var(--accent2);
-      font-size: 0.78rem;
+      background: var(--accent-bg);
+      color: var(--accent);
+      font-size: 0.75rem;
       font-weight: 600;
       cursor: pointer;
       transition: background 0.15s;
       font-family: inherit;
       white-space: nowrap;
     }
-    .btn-retry:hover { background: rgba(56,189,248,0.2); }
+    .btn-retry:hover { background: var(--accent-bg2); }
     .btn-retry:disabled { opacity: 0.4; cursor: wait; }
 
-    /* ── Divider ── */
-    .divider { width: 100%; height: 1px; background: var(--border); }
-
-    /* ── Batch section ── */
-    .batch-info {
-      width: 100%;
-      background: var(--surface);
+    .btn-download-all {
+      padding: 10px 18px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 20px;
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
+      background: var(--success-bg);
+      color: var(--success);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-family: inherit;
     }
-    .batch-info-icon { font-size: 1.3rem; flex-shrink: 0; margin-top: 1px; }
-    .batch-info p { font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
-    .batch-info code { color: var(--accent2); background: rgba(56,189,248,0.08); padding: 1px 5px; border-radius: 4px; font-size: 0.78rem; }
-
-    .folder-row { display: flex; gap: 10px; width: 100%; }
-    .folder-row .field-input { flex: 1; font-family: 'Courier New', monospace; font-size: 0.84rem; }
-
-    #batch-log { width: 100%; display: none; flex-direction: column; gap: 10px; }
-    #batch-log.visible { display: flex; }
-    .log-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 18px;
-      max-height: 220px;
-      overflow-y: auto;
-      font-family: 'Courier New', monospace;
-    }
-    .log-line { font-size: 0.8rem; line-height: 1.9; color: var(--muted2); }
-    .log-line.ok    { color: var(--success); }
-    .log-line.err   { color: var(--danger); }
-    .log-line.info  { color: var(--text); }
-    .log-line.title { color: var(--accent); font-weight: 700; margin-top: 6px; }
-
-    /* ── Batch image results grid ── */
-    #batch-results {
-      width: 100%;
-      display: none;
-      flex-direction: column;
-      gap: 28px;
-    }
-    #batch-results.visible { display: flex; }
-
-    .batch-product-section { display: flex; flex-direction: column; gap: 10px; }
-    .batch-product-title {
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--accent);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .batch-product-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-    .batch-angles-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .batch-angles-grid .result-card.detail-card,
-    .batch-angles-grid .batch-angle-pending.detail-placeholder {
-      grid-column: 1 / -1;
-      max-width: 50%;
-      margin: 0 auto;
-    }
-    @media (max-width: 540px) {
-      .batch-angles-grid { grid-template-columns: 1fr; }
-      .batch-angles-grid .result-card.detail-card,
-      .batch-angles-grid .batch-angle-pending.detail-placeholder { max-width: 100%; }
-    }
-
-    .batch-angle-pending {
-      aspect-ratio: 1/1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      background: var(--surface);
-      border: 1.5px dashed var(--border2);
-      border-radius: var(--radius);
-      color: var(--muted2);
-      font-size: 0.78rem;
-    }
-    .batch-angle-pending .mini-spinner {
-      width: 16px; height: 16px;
-      border: 2px solid var(--border2);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
-    .batch-angle-pending.queued .mini-spinner { visibility: hidden; }
+    .btn-download-all:hover { background: #dcfce7; }
 
     /* ── Error ── */
     #error-box {
       width: 100%;
       display: none;
-      padding: 13px 18px;
+      padding: 12px 16px;
       border-radius: var(--radius);
-      background: rgba(248,113,113,0.08);
-      border: 1px solid rgba(248,113,113,0.2);
+      background: var(--danger-bg);
+      border: 1px solid #fecaca;
       color: var(--danger);
-      font-size: 0.85rem;
+      font-size: 0.82rem;
     }
     #error-box.visible { display: block; }
 
-    /* ── Misc ── */
+    /* ── Clear button ── */
     .clear-btn {
       background: none;
       border: 1px solid var(--border);
       color: var(--muted);
-      padding: 5px 12px;
+      padding: 4px 10px;
       border-radius: var(--radius-sm);
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       cursor: pointer;
       font-family: inherit;
       transition: border-color 0.15s, color 0.15s;
     }
     .clear-btn:hover { border-color: var(--danger); color: var(--danger); }
 
-    /* ── Batch cancel button ── */
+    /* ── Batch section ── */
+    .batch-info {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    .batch-info code { color: var(--gold); background: var(--accent-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.75rem; }
+
+    .folder-row { display: flex; gap: 8px; width: 100%; }
+    .folder-row .field-input { flex: 1; font-family: 'Courier New', monospace; font-size: 0.82rem; }
+
+    #batch-log { width: 100%; display: none; flex-direction: column; gap: 8px; margin-top: 16px; }
+    #batch-log.visible { display: flex; }
+    .log-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+    }
+    .log-line { font-size: 0.78rem; line-height: 1.8; color: var(--muted2); }
+    .log-line.ok    { color: var(--success); }
+    .log-line.err   { color: var(--danger); }
+    .log-line.info  { color: var(--text); }
+    .log-line.title { color: var(--gold); font-weight: 700; margin-top: 4px; }
+
+    #batch-results { width: 100%; display: none; flex-direction: column; gap: 24px; margin-top: 16px; }
+    #batch-results.visible { display: flex; }
+    .batch-product-section { display: flex; flex-direction: column; gap: 8px; }
+    .batch-product-title {
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--gold);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .batch-product-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .batch-angles-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    @media (max-width: 540px) { .batch-angles-grid { grid-template-columns: 1fr; } }
+
+    .batch-angle-pending {
+      aspect-ratio: 1/1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      background: var(--surface2);
+      border: 1.5px dashed var(--border2);
+      border-radius: var(--radius);
+      color: var(--muted2);
+      font-size: 0.75rem;
+    }
+    .batch-angle-pending .mini-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    .batch-angle-pending.queued .mini-spinner { visibility: hidden; }
+
     .btn-cancel-batch {
       width: 100%;
-      padding: 13px;
-      font-size: 0.9rem;
+      padding: 12px;
+      font-size: 0.85rem;
       font-weight: 600;
       border-radius: var(--radius);
-      border: 1px solid rgba(248,113,113,0.3);
-      background: rgba(248,113,113,0.08);
+      border: 1px solid #fecaca;
+      background: var(--danger-bg);
       color: var(--danger);
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
+      transition: background 0.15s;
       font-family: inherit;
       display: none;
+      margin-top: 8px;
     }
-    .btn-cancel-batch:hover { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.5); }
+    .btn-cancel-batch:hover { background: #fee2e2; }
     .btn-cancel-batch.visible { display: block; }
 
-    /* ── Download All button ── */
-    .btn-download-all {
-      padding: 11px 20px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border2);
-      background: rgba(52,211,153,0.08);
-      color: var(--success);
-      font-size: 0.82rem;
-      font-weight: 600;
+    /* ── Quick presets ── */
+    .presets-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .preset-btn {
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text2);
+      font-size: 0.75rem;
+      font-weight: 500;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
+      transition: all 0.15s;
       font-family: inherit;
     }
-    .btn-download-all:hover { background: rgba(52,211,153,0.15); border-color: var(--success); }
+    .preset-btn:hover { border-color: var(--gold); color: var(--gold); }
+    .preset-btn.active { border-color: var(--gold); background: var(--accent-bg); color: var(--accent); }
+
+    /* ── Provider selector ── */
+    .provider-group {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .provider-btn {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .provider-btn .provider-sub {
+      font-size: 0.65rem;
+      font-weight: 400;
+      opacity: 0.7;
+    }
+    .provider-btn:hover { border-color: var(--border2); color: var(--text2); }
+    .provider-btn.active { border-color: var(--gold); background: var(--accent-bg); color: var(--accent); }
+    .provider-btn.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+    .provider-note {
+      font-size: 0.7rem;
+      color: var(--muted2);
+      margin-top: -8px;
+      margin-bottom: 12px;
+    }
+
+    /* ── Cost tracker bar ── */
+    .cost-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1a1a1a;
+      color: #fff;
+      font-family: 'Red Hat Text', sans-serif;
+      font-size: 0.75rem;
+      z-index: 1000;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      height: 38px;
+      gap: 0;
+    }
+    .cost-bar-section {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 14px;
+      height: 100%;
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+    .cost-bar-section:last-child { border-right: none; }
+    .cost-bar-section.total {
+      padding-left: 0;
+    }
+    .cost-label {
+      color: rgba(255,255,255,0.45);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .cost-value {
+      font-weight: 700;
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .cost-value.total-cost {
+      color: #f0c040;
+      font-size: 0.9rem;
+    }
+    .cost-images {
+      color: rgba(255,255,255,0.55);
+      font-size: 0.65rem;
+    }
+    .cost-provider-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .cost-provider-dot.gemini { background: #4285f4; }
+    .cost-provider-dot.openai { background: #10a37f; }
+    .cost-provider-dot.nanobana2 { background: #f4b400; }
+    .cost-bar-reset {
+      margin-left: auto;
+      background: none;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.5);
+      font-size: 0.6rem;
+      padding: 3px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.15s;
+    }
+    .cost-bar-reset:hover {
+      border-color: rgba(255,255,255,0.35);
+      color: rgba(255,255,255,0.8);
+    }
+
+    /* pad bottom of page so content isn't hidden behind bar */
+    body { padding-bottom: 48px; }
   </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">
-    <div class="logo-icon">💎</div>
-    <span class="logo-text">Jewelry Pipeline</span>
+  <div class="brand">
+    <img src="/assets/logo.png" alt="MINA" class="brand-logo" />
   </div>
-  <h1>Turn raw photos into<br>luxury product shots</h1>
-  <p>Upload one or multiple angles — get 4 polished ecommerce shots or editorial model photos</p>
+  <h1>Product Shot Pipeline</h1>
+  <p>Upload references, pick your shots, generate</p>
 </header>
 
-<div class="stack">
+<div class="container">
 
-  <!-- Tabs -->
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="single">📸 Single Product</button>
-    <button class="tab-btn" data-tab="batch">📁 Batch Folder</button>
-  </div>
+  <!-- ═══ UPLOAD ═══ -->
+  <div class="card" id="card-upload">
+    <div class="card-label">1. Upload Reference Photos</div>
 
-  <!-- ══ SINGLE PRODUCT ══ -->
-  <div class="tab-panel active" id="tab-single">
-
-    <!-- Drop zone -->
-    <div class="drop-zone" id="drop-zone">
-      <input type="file" id="file-input" accept="image/*,.heic,.heif" multiple />
-      <div class="drop-icon">🖼</div>
-      <h3>Drop your product photos here</h3>
-      <p>or click to browse</p>
-      <div class="drop-hint">JPG, PNG, HEIC, WEBP · up to 10 images</div>
+    <div class="mode-tabs">
+      <button class="mode-tab active" data-mode="single">Upload Images</button>
+      <button class="mode-tab" data-mode="batch">Batch Folder</button>
     </div>
 
-    <!-- Previews -->
-    <div id="previews">
-      <div class="previews-header">
-        <span id="preview-count">0 images selected</span>
-        <button class="clear-btn" id="btn-clear-all">Clear all</button>
+    <div class="mode-panel active" id="panel-single">
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="image/*,.heic,.heif" multiple />
+        <h3>Drop product photos here</h3>
+        <p>or click to browse</p>
+        <div class="drop-hint">JPG, PNG, HEIC, WEBP — up to 10 images</div>
       </div>
-      <div class="previews-grid" id="previews-grid"></div>
+      <div id="previews">
+        <div class="previews-header">
+          <span id="preview-count">0 images</span>
+          <button class="clear-btn" id="btn-clear-all">Clear</button>
+        </div>
+        <div class="previews-grid" id="previews-grid"></div>
+      </div>
     </div>
 
-    <!-- Settings -->
-    <div class="settings">
+    <div class="mode-panel" id="panel-batch">
+      <div class="batch-info">
+        Point to a folder with <strong>one subfolder per product</strong>. Each subfolder has reference images.
+        Outputs save to <code>output/</code> inside your folder.
+      </div>
       <div class="field">
-        <div class="field-label">Output type</div>
-        <div class="mode-group">
-          <button class="mode-btn active" data-mode="ecommerce">
-            <span class="mode-icon">📦</span>Ecommerce
-          </button>
-          <button class="mode-btn" data-mode="both">
-            <span class="mode-icon">✨</span>Both
-          </button>
-          <button class="mode-btn" data-mode="model">
-            <span class="mode-icon">👗</span>Model
-          </button>
+        <div class="field-label">Products folder path</div>
+        <div class="folder-row">
+          <input type="text" id="folder-path" class="field-input" placeholder="/Users/you/Products" />
         </div>
       </div>
-      <div class="field">
-        <div class="field-label">Custom instruction <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></div>
-        <input type="text" id="custom-instruction" class="field-input" placeholder='e.g. "dark marble surface" or "brunette model, outdoor"' />
-      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SHOT SELECTION ═══ -->
+  <div class="card" id="card-shots">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div class="card-label" style="margin-bottom:0;">2. Choose Shots</div>
+      <span class="shot-count-badge" id="shot-count">0 selected</span>
     </div>
 
-    <button class="btn-generate" id="btn-generate" disabled>Generate Images</button>
-
-    <!-- Progress -->
-    <div id="progress">
-      <div class="progress-inner">
-        <div class="spinner"></div>
-        <div class="progress-text" id="progress-text"><strong>Generating…</strong> Sending to Gemini</div>
-        <div class="progress-steps" id="progress-steps"></div>
-      </div>
+    <!-- Quick presets -->
+    <div class="presets-row">
+      <button class="preset-btn" data-preset="quick">Quick (Hero + Detail)</button>
+      <button class="preset-btn" data-preset="ecommerce">All Ecommerce</button>
+      <button class="preset-btn" data-preset="model">All Model</button>
+      <button class="preset-btn" data-preset="editorial">Editorial Set</button>
+      <button class="preset-btn" data-preset="all">Everything</button>
     </div>
 
-    <!-- Error -->
-    <div id="error-box"></div>
+    <div id="shot-categories"></div>
+  </div>
 
-    <!-- Results -->
-    <div id="results">
-      <div id="results-grid"></div>
+  <!-- ═══ EXTRAS ═══ -->
+  <div class="card">
+    <div class="card-label">3. Generate</div>
+
+    <div class="field-label" style="margin-bottom:8px;">AI Provider</div>
+    <div class="provider-group" id="provider-group">
+      <!-- Filled dynamically from /providers -->
     </div>
+    <div class="provider-note" id="provider-note"></div>
 
-  </div><!-- /tab-single -->
-
-  <!-- ══ BATCH FOLDER ══ -->
-  <div class="tab-panel" id="tab-batch">
-
-    <div class="batch-info">
-      <div class="batch-info-icon">📂</div>
-      <p>
-        Point to a folder that contains <strong>one subfolder per product</strong>. Each subfolder can have multiple angles (JPG, PNG, HEIC, etc.).<br>
-        Outputs are saved as <code>ecommerce/front.png</code>, <code>elevated.png</code>, <code>band.png</code>, <code>detail.png</code>, <code>model.png</code> inside each product folder.
-        All products in a batch share a consistent photographic style.
-      </p>
+    <div class="field" style="margin-bottom:16px;">
+      <div class="field-label">Custom direction <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></div>
+      <input type="text" id="custom-instruction" class="field-input" placeholder='e.g. "use rose gold tones" or "dramatic shadows"' />
     </div>
-
-    <div class="field" style="width:100%">
-      <div class="field-label">Products folder path</div>
-      <div class="folder-row">
-        <input type="text" id="folder-path" class="field-input" placeholder="/Users/you/Products" />
-      </div>
-    </div>
-
-    <div class="field" style="width:100%">
-      <div class="field-label">Custom instruction <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional — applies to all products)</span></div>
-      <input type="text" id="batch-custom-instruction" class="field-input" placeholder='e.g. "dark marble surface" or "brunette model, outdoor"' />
-    </div>
-
-    <button class="btn-generate" id="btn-batch" disabled>Process Batch Folder</button>
+    <button class="btn-generate" id="btn-generate" disabled>Generate Shots</button>
     <button class="btn-cancel-batch" id="btn-cancel-batch">Cancel Batch</button>
+  </div>
 
-    <!-- Text log -->
-    <div id="batch-log">
-      <div class="results-title">Batch Progress</div>
-      <div class="log-box"><div id="log-entries"></div></div>
+  <!-- ═══ PROGRESS ═══ -->
+  <div id="progress">
+    <div class="progress-inner">
+      <div class="spinner"></div>
+      <div class="progress-text" id="progress-text"><strong>Generating...</strong> Analyzing jewelry</div>
+      <div class="progress-steps" id="progress-steps"></div>
     </div>
+  </div>
 
-    <!-- Generated photos — appear progressively as each angle completes -->
-    <div id="batch-results"></div>
+  <div id="error-box"></div>
 
-  </div><!-- /tab-batch -->
+  <!-- ═══ RESULTS ═══ -->
+  <div id="results">
+    <div class="results-header">
+      <div class="results-title">Generated Shots</div>
+      <button class="btn-download-all" id="btn-download-all" style="display:none">Download All ZIP</button>
+    </div>
+    <div class="results-grid" id="results-grid"></div>
+  </div>
 
-</div><!-- /stack -->
+  <!-- ═══ BATCH LOG & RESULTS ═══ -->
+  <div id="batch-log">
+    <div class="results-title" style="margin-bottom:6px;">Batch Progress</div>
+    <div class="log-box"><div id="log-entries"></div></div>
+  </div>
+  <div id="batch-results"></div>
+
+</div>
+
+<div class="cost-bar">
+  <div class="cost-bar-section total">
+    <span class="cost-label">Session</span>
+    <span class="cost-value total-cost" id="cost-total-value">$0.000</span>
+    <span class="cost-images" id="cost-total-images">0 imgs</span>
+  </div>
+  <div class="cost-bar-section" id="cost-gemini">
+    <span class="cost-provider-dot gemini"></span>
+    <span class="cost-label">Gemini</span>
+    <span class="cost-value">$0.000</span>
+    <span class="cost-images">0</span>
+  </div>
+  <div class="cost-bar-section" id="cost-nanobana2">
+    <span class="cost-provider-dot nanobana2"></span>
+    <span class="cost-label">NB2</span>
+    <span class="cost-value">$0.000</span>
+    <span class="cost-images">0</span>
+  </div>
+  <div class="cost-bar-section" id="cost-openai">
+    <span class="cost-provider-dot openai"></span>
+    <span class="cost-label">OpenAI</span>
+    <span class="cost-value">$0.000</span>
+    <span class="cost-images">0</span>
+  </div>
+  <button class="cost-bar-reset" id="cost-reset-btn">Reset</button>
+</div>
 
 <script>
-  // ── Tab switching ─────────────────────────────────────────────────────────
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    });
-  });
-
   // ── State ─────────────────────────────────────────────────────────────────
   let selectedFiles = [];
-  let selectedMode  = 'ecommerce';
+  let selectedShots = new Set();
+  let shotCatalog = {};
+  let availableProviders = {};
+  let selectedProvider = 'gemini';
+  let generatedImages = [];
+  let genState = { files: [], customInstruction: '' };
 
-  // Stored for per-angle retry (single product tab)
-  let genState = { files: [], frontData: null, customInstruction: '' };
+  const PRESETS = {
+    quick:      ['ecom_hero', 'ecom_detail'],
+    ecommerce:  ['ecom_hero', 'ecom_angle', 'ecom_detail', 'ecom_flat', 'ecom_stand', 'ecom_group'],
+    model:      ['model_wrist', 'model_neck', 'model_ear', 'model_lifestyle'],
+    editorial:  ['ecom_hero', 'ecom_detail', 'model_wrist', 'marble'],
+    all:        [], // filled after catalog loads
+  };
 
-  // Track all generated images for Download All ZIP
-  let generatedImages = []; // [{ name, b64 }]
+  const CATEGORY_META = {
+    ecommerce: { label: 'Ecommerce',  cls: 'cat-ecommerce' },
+    model:     { label: 'Model Shots', cls: 'cat-model' },
+    marble:    { label: 'Surface / Marble', cls: 'cat-marble' },
+  };
 
-  const ANGLE_NAMES = ['Angle 1', 'Angle 2', 'Angle 3', 'Angle 4', 'Angle 5',
-                       'Angle 6', 'Angle 7', 'Angle 8', 'Angle 9', 'Angle 10'];
+  const LABEL_CLASS = {
+    ecommerce: 'label-ecommerce',
+    model:     'label-model',
+    marble:    'label-marble',
+  };
 
   // ── Elements ──────────────────────────────────────────────────────────────
   const dropZone      = document.getElementById('drop-zone');
@@ -743,13 +953,151 @@
   const resultsEl     = document.getElementById('results');
   const resultsGrid   = document.getElementById('results-grid');
   const customInput   = document.getElementById('custom-instruction');
+  const shotCountEl   = document.getElementById('shot-count');
+  const btnDownloadAll = document.getElementById('btn-download-all');
 
-  // ── Mode selector ─────────────────────────────────────────────────────────
-  document.querySelectorAll('.mode-btn').forEach(btn => {
+  // ── Load shot catalog from server ─────────────────────────────────────────
+  async function loadCatalog() {
+    const [shotsRes, provRes] = await Promise.all([fetch('/shots'), fetch('/providers')]);
+    shotCatalog = await shotsRes.json();
+    availableProviders = await provRes.json();
+    PRESETS.all = Object.keys(shotCatalog);
+    renderShotSelector();
+    renderProviders();
+  }
+
+  const PROVIDER_INFO = {
+    gemini:    { label: 'Gemini',         sub: 'Nano Banana Pro' },
+    openai:    { label: 'OpenAI',         sub: 'GPT Image 1.5' },
+    nanobana2: { label: 'Nano Banana 2',  sub: 'Gemini 3.1 Flash · 2K' },
+  };
+
+  function renderProviders() {
+    const group = document.getElementById('provider-group');
+    const note = document.getElementById('provider-note');
+    group.innerHTML = '';
+
+    for (const [id, info] of Object.entries(availableProviders)) {
+      const meta = PROVIDER_INFO[id] || { label: id, sub: '' };
+      const btn = document.createElement('button');
+      btn.className = 'provider-btn' + (id === selectedProvider ? ' active' : '');
+      btn.dataset.provider = id;
+      btn.innerHTML = `${meta.label}<span class="provider-sub">${meta.sub}</span>`;
+      btn.addEventListener('click', () => {
+        selectedProvider = id;
+        document.querySelectorAll('.provider-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        note.textContent = '';
+      });
+      group.appendChild(btn);
+    }
+
+    // Default to first available if gemini not present
+    if (!availableProviders[selectedProvider] && Object.keys(availableProviders).length > 0) {
+      selectedProvider = Object.keys(availableProviders)[0];
+      renderProviders();
+    }
+  }
+
+  function renderShotSelector() {
+    const container = document.getElementById('shot-categories');
+    container.innerHTML = '';
+
+    const categories = {};
+    for (const [id, shot] of Object.entries(shotCatalog)) {
+      const cat = shot.category;
+      if (!categories[cat]) categories[cat] = [];
+      categories[cat].push(shot);
+    }
+
+    for (const [cat, shots] of Object.entries(categories)) {
+      const meta = CATEGORY_META[cat] || { label: cat, cls: '' };
+
+      const section = document.createElement('div');
+      section.className = 'shot-category';
+
+      const header = document.createElement('div');
+      header.className = 'shot-category-header';
+
+      const title = document.createElement('div');
+      title.className = `shot-category-title ${meta.cls}`;
+      title.innerHTML = `<span class="cat-dot"></span>${meta.label}`;
+
+      const selectAll = document.createElement('button');
+      selectAll.className = 'select-all-btn';
+      selectAll.textContent = 'Select all';
+      selectAll.addEventListener('click', () => {
+        const allInCat = shots.map(s => s.id);
+        const allSelected = allInCat.every(id => selectedShots.has(id));
+        allInCat.forEach(id => allSelected ? selectedShots.delete(id) : selectedShots.add(id));
+        updateShotUI();
+      });
+
+      header.append(title, selectAll);
+
+      const grid = document.createElement('div');
+      grid.className = 'shot-grid';
+
+      shots.forEach(shot => {
+        const opt = document.createElement('div');
+        opt.className = 'shot-option';
+        opt.dataset.shotId = shot.id;
+        opt.innerHTML = `
+          <div class="shot-checkbox">
+            <svg viewBox="0 0 14 14"><polyline points="2.5 7 5.5 10 11.5 4"></polyline></svg>
+          </div>
+          <div class="shot-info">
+            <div class="shot-name">${shot.label}</div>
+            <div class="shot-desc">${shot.description}</div>
+          </div>
+        `;
+        opt.addEventListener('click', () => {
+          if (selectedShots.has(shot.id)) selectedShots.delete(shot.id);
+          else selectedShots.add(shot.id);
+          updateShotUI();
+        });
+        grid.appendChild(opt);
+      });
+
+      section.append(header, grid);
+      container.appendChild(section);
+    }
+  }
+
+  function updateShotUI() {
+    document.querySelectorAll('.shot-option').forEach(opt => {
+      opt.classList.toggle('checked', selectedShots.has(opt.dataset.shotId));
+    });
+    shotCountEl.textContent = `${selectedShots.size} selected`;
+    updateGenerateButton();
+
+    // Update preset buttons
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      const ids = PRESETS[btn.dataset.preset] || [];
+      const isActive = ids.length > 0 && ids.every(id => selectedShots.has(id)) && selectedShots.size === ids.length;
+      btn.classList.toggle('active', isActive);
+    });
+  }
+
+  // ── Presets ───────────────────────────────────────────────────────────────
+  document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      selectedMode = btn.dataset.mode;
+      const ids = PRESETS[btn.dataset.preset] || [];
+      selectedShots = new Set(ids);
+      updateShotUI();
+    });
+  });
+
+  // ── Mode tabs ─────────────────────────────────────────────────────────────
+  let currentMode = 'single';
+  document.querySelectorAll('.mode-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      currentMode = tab.dataset.mode;
+      document.getElementById('panel-' + currentMode).classList.add('active');
+      updateGenerateButton();
     });
   });
 
@@ -766,7 +1114,6 @@
     fileInput.value = '';
   });
 
-  // ── File management ───────────────────────────────────────────────────────
   function addFiles(files) {
     const remaining = 10 - selectedFiles.length;
     files.slice(0, remaining).forEach(f => selectedFiles.push(f));
@@ -780,18 +1127,15 @@
 
   function renderPreviews() {
     previewsGrid.innerHTML = '';
-
     if (selectedFiles.length === 0) {
       previewsWrap.classList.remove('visible');
       dropZone.style.display = '';
-      btnGenerate.disabled = true;
+      updateGenerateButton();
       return;
     }
-
     dropZone.style.display = 'none';
     previewsWrap.classList.add('visible');
-    btnGenerate.disabled = false;
-    previewCount.textContent = `${selectedFiles.length} image${selectedFiles.length > 1 ? 's' : ''} selected`;
+    previewCount.textContent = `${selectedFiles.length} image${selectedFiles.length > 1 ? 's' : ''}`;
 
     selectedFiles.forEach((file, i) => {
       const card = document.createElement('div');
@@ -799,17 +1143,11 @@
       const img = document.createElement('img');
       img.src = URL.createObjectURL(file);
       img.onload = () => URL.revokeObjectURL(img.src);
-
-      const badge = document.createElement('div');
-      badge.className = 'angle-badge';
-      badge.textContent = ANGLE_NAMES[i];
-
       const rm = document.createElement('button');
       rm.className = 'remove-btn';
       rm.innerHTML = '\u2715';
       rm.onclick = (e) => { e.stopPropagation(); removeFile(i); };
-
-      card.append(img, badge, rm);
+      card.append(img, rm);
       previewsGrid.appendChild(card);
     });
 
@@ -821,11 +1159,23 @@
       addInput.accept = 'image/*,.heic,.heif';
       addInput.multiple = true;
       addInput.onchange = () => { addFiles(Array.from(addInput.files)); addInput.value = ''; };
-      addCard.innerHTML = '<span>\uff0b</span><p>Add more</p>';
+      addCard.innerHTML = '<span>+</span><p>Add</p>';
       addCard.appendChild(addInput);
       previewsGrid.appendChild(addCard);
     }
+    updateGenerateButton();
   }
+
+  function updateGenerateButton() {
+    const hasInput = currentMode === 'single'
+      ? selectedFiles.length > 0
+      : document.getElementById('folder-path').value.trim().length > 0;
+    const hasShots = selectedShots.size > 0;
+    btnGenerate.disabled = !(hasInput && hasShots);
+    btnGenerate.textContent = currentMode === 'batch' ? 'Process Batch' : `Generate ${selectedShots.size} Shot${selectedShots.size !== 1 ? 's' : ''}`;
+  }
+
+  document.getElementById('folder-path').addEventListener('input', updateGenerateButton);
 
   btnClearAll.addEventListener('click', () => {
     selectedFiles = [];
@@ -834,33 +1184,38 @@
     hideError();
     resultsEl.classList.remove('visible');
     resultsGrid.innerHTML = '';
+    btnDownloadAll.style.display = 'none';
   });
 
   // ── Generate ──────────────────────────────────────────────────────────────
   btnGenerate.addEventListener('click', async () => {
-    if (selectedFiles.length === 0) return;
+    if (currentMode === 'batch') { startBatch(); return; }
+
+    if (selectedFiles.length === 0 || selectedShots.size === 0) return;
 
     hideError();
     resultsEl.classList.remove('visible');
     resultsGrid.innerHTML = '';
+    btnDownloadAll.style.display = 'none';
     generatedImages = [];
     setLoading(true);
 
-    // Snapshot state so retry buttons can reuse the same files
-    genState = { files: [...selectedFiles], frontData: null, customInstruction: customInput.value.trim() };
+    genState = { files: [...selectedFiles], customInstruction: customInput.value.trim() };
 
     const formData = new FormData();
     selectedFiles.forEach(f => formData.append('images[]', f));
-    formData.append('outputType', selectedMode);
+    formData.append('shots', JSON.stringify([...selectedShots]));
     formData.append('customInstruction', genState.customInstruction);
+    formData.append('provider', selectedProvider);
 
     try {
       const res  = await fetch('/generate', { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok || !data.success) { showError(data.error || 'Something went wrong.'); return; }
+      if (data.usage) updateCostBar(data.usage);
       renderResults(data.results);
     } catch (err) {
-      showError('Network error \u2014 is the server running?');
+      showError('Network error — is the server running?');
     } finally {
       setLoading(false);
     }
@@ -871,84 +1226,24 @@
     resultsGrid.innerHTML = '';
     generatedImages = [];
 
-    if (results.ecommerce?.length) {
-      // Keep front ref for retry consistency on other angles
-      const frontResult = results.ecommerce.find(r => r.id === 'front');
-      if (frontResult) genState.frontData = frontResult.data;
-
-      const titleRow = document.createElement('div');
-      titleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;';
-      const title = document.createElement('div');
-      title.className = 'results-title';
-      title.style.flex = '1';
-      title.textContent = '\ud83d\udce6 Ecommerce Shots';
-      titleRow.appendChild(title);
-
-      resultsGrid.appendChild(titleRow);
-
-      const grid = document.createElement('div');
-      grid.className = 'angles-grid';
-
-      results.ecommerce.forEach(({ id, label, data }) => {
-        generatedImages.push({ name: `product_${id}.png`, b64: data });
+    if (results.shots?.length) {
+      results.shots.forEach(({ id, label, category, data }) => {
+        generatedImages.push({ name: `${id}.png`, b64: data });
+        const labelCls = LABEL_CLASS[category] || 'label-ecommerce';
         const card = makeResultCard(
-          `data:image/png;base64,${data}`, label, 'ecommerce-label', id, data,
-          (card, btn) => retryAngle(id, card, btn)
+          `data:image/png;base64,${data}`, label, labelCls, id, data,
+          (card, btn) => retryShot(id, card, btn)
         );
-        if (id === 'detail') card.classList.add('detail-card');
-        grid.appendChild(card);
+        resultsGrid.appendChild(card);
       });
-      resultsGrid.appendChild(grid);
     }
 
-    if (results.model) {
-      generatedImages.push({ name: 'product_model.png', b64: results.model });
-      const title = document.createElement('div');
-      title.className = 'results-title';
-      title.style.marginTop = '8px';
-      title.textContent = '\ud83d\udc57 Model Shot';
-      resultsGrid.appendChild(title);
-
-      const card = makeResultCard(
-        `data:image/png;base64,${results.model}`, 'Model Shot', 'model-label', 'model', results.model,
-        (card, btn) => retryAngle('model', card, btn)
-      );
-      card.style.maxWidth = '360px';
-      resultsGrid.appendChild(card);
-    }
-
-    // Download All ZIP button
     if (generatedImages.length > 1) {
-      const dlAllBtn = document.createElement('button');
-      dlAllBtn.className = 'btn-download-all';
-      dlAllBtn.textContent = '\u2b07 Download All as ZIP';
-      dlAllBtn.addEventListener('click', () => downloadAllZip(generatedImages));
-      resultsGrid.appendChild(dlAllBtn);
+      btnDownloadAll.style.display = '';
     }
 
     resultsEl.classList.add('visible');
     resultsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
-  // ── Download All ZIP ───────────────────────────────────────────────────────
-  async function downloadAllZip(images) {
-    try {
-      const res = await fetch('/download-zip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ images: images.map(i => ({ name: i.name, base64: i.b64 })) }),
-      });
-      if (!res.ok) throw new Error('ZIP generation failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'product_shots.zip';
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      showError('Failed to download ZIP: ' + err.message);
-    }
   }
 
   function makeResultCard(src, label, labelCls, key, b64, onRetry = null) {
@@ -970,11 +1265,11 @@
     dlBtn.className = 'btn-dl';
     dlBtn.dataset.b64 = b64;
     dlBtn.dataset.label = key;
-    dlBtn.textContent = '\u2b07 Download PNG';
+    dlBtn.textContent = 'Download PNG';
     dlBtn.addEventListener('click', () => {
       const a = document.createElement('a');
       a.href = `data:image/png;base64,${dlBtn.dataset.b64}`;
-      a.download = `product_${dlBtn.dataset.label}.png`;
+      a.download = `hom_${dlBtn.dataset.label}.png`;
       a.click();
     });
     actions.appendChild(dlBtn);
@@ -982,7 +1277,7 @@
     if (onRetry) {
       const retryBtn = document.createElement('button');
       retryBtn.className = 'btn-retry';
-      retryBtn.textContent = '\u21ba Retry';
+      retryBtn.textContent = 'Retry';
       retryBtn.addEventListener('click', () => onRetry(card, retryBtn));
       actions.appendChild(retryBtn);
     }
@@ -991,55 +1286,74 @@
     return card;
   }
 
-  // ── Single-product angle retry ─────────────────────────────────────────────
-  async function retryAngle(angleId, card, retryBtn) {
+  // ── Retry ─────────────────────────────────────────────────────────────────
+  async function retryShot(shotId, card, retryBtn) {
     if (!genState.files || genState.files.length === 0) return;
 
     retryBtn.disabled = true;
-    retryBtn.textContent = '\u21ba Retrying\u2026';
+    retryBtn.textContent = 'Retrying...';
     const img = card.querySelector('img');
     img.style.opacity = '0.35';
 
     const formData = new FormData();
     genState.files.forEach(f => formData.append('images[]', f));
-    formData.append('angleId', angleId);
+    formData.append('angleId', shotId);
     formData.append('customInstruction', genState.customInstruction);
-    if (angleId !== 'front' && genState.frontData) {
-      formData.append('frontRef', genState.frontData);
-    }
+    formData.append('provider', selectedProvider);
 
     try {
       const res  = await fetch('/generate-angle', { method: 'POST', body: formData });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || 'Retry failed.');
+      if (data.usage) updateCostBar(data.usage);
 
       img.src = `data:image/png;base64,${data.imageData}`;
       card.querySelector('.btn-dl').dataset.b64 = data.imageData;
-      if (angleId === 'front') genState.frontData = data.imageData;
 
-      // Update ZIP data
-      const idx = generatedImages.findIndex(i => i.name === `product_${angleId}.png`);
+      const idx = generatedImages.findIndex(i => i.name === `${shotId}.png`);
       if (idx >= 0) generatedImages[idx].b64 = data.imageData;
 
-      retryBtn.textContent = '\u21ba Retry';
+      retryBtn.textContent = 'Retry';
     } catch (err) {
-      retryBtn.textContent = '\u2717 Failed';
-      setTimeout(() => { retryBtn.textContent = '\u21ba Retry'; }, 2500);
+      retryBtn.textContent = 'Failed';
+      setTimeout(() => { retryBtn.textContent = 'Retry'; }, 2500);
     } finally {
       retryBtn.disabled = false;
       img.style.opacity = '';
     }
   }
 
+  // ── Download All ZIP ──────────────────────────────────────────────────────
+  btnDownloadAll.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: generatedImages.map(i => ({ name: i.name, data: i.b64 })) }),
+      });
+      if (!res.ok) throw new Error('ZIP generation failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'house_of_mina_shots.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showError('Failed to download ZIP: ' + err.message);
+    }
+  });
+
   // ── Progress helpers ──────────────────────────────────────────────────────
   function setLoading(on) {
     btnGenerate.disabled = on;
     btnGenerate.classList.toggle('loading', on);
-    btnGenerate.textContent = on ? 'Generating\u2026' : 'Generate Images';
+    if (on) btnGenerate.textContent = 'Generating...';
+    else updateGenerateButton();
     progressEl.classList.toggle('visible', on);
 
     if (on) {
-      const steps = selectedMode === 'ecommerce' ? 4 : selectedMode === 'model' ? 1 : 5;
+      const steps = selectedShots.size + 1; // +1 for analysis
       progressSteps.innerHTML = Array.from({ length: steps }, (_, i) =>
         `<div class="step-dot" id="dot-${i}"></div>`
       ).join('');
@@ -1057,48 +1371,31 @@
       });
       if (i < total) i++;
       else clearInterval(dotTimer);
-    }, 18000 / total);
+    }, 20000 / total);
   }
 
   function showError(msg) { errorBox.textContent = msg; errorBox.classList.add('visible'); }
   function hideError()    { errorBox.textContent = ''; errorBox.classList.remove('visible'); }
 
-  // ── Batch folder ──────────────────────────────────────────────────────────
-  const folderPathInput       = document.getElementById('folder-path');
-  const batchCustomInput      = document.getElementById('batch-custom-instruction');
-  const btnBatch              = document.getElementById('btn-batch');
-  const btnCancelBatch        = document.getElementById('btn-cancel-batch');
-  const batchLog              = document.getElementById('batch-log');
-  const logEntries            = document.getElementById('log-entries');
-  const batchResultsEl        = document.getElementById('batch-results');
-
-  // Maps product name \u2192 productFolder path (for retry calls)
-  const batchFolderMap = {};
-
-  const ANGLE_META = [
-    { id: 'front',    label: 'Top-Down 45\u00b0'    },
-    { id: 'elevated', label: '3/4 Elevated'    },
-    { id: 'band',     label: 'Band Focus'      },
-    { id: 'detail',   label: 'Detail Close-up' },
-  ];
-
-  folderPathInput.addEventListener('input', () => {
-    btnBatch.disabled = !folderPathInput.value.trim();
-  });
+  // ── Batch ─────────────────────────────────────────────────────────────────
+  const folderPathInput  = document.getElementById('folder-path');
+  const btnCancelBatch   = document.getElementById('btn-cancel-batch');
+  const batchLog         = document.getElementById('batch-log');
+  const logEntries       = document.getElementById('log-entries');
+  const batchResultsEl   = document.getElementById('batch-results');
+  const batchFolderMap   = {};
 
   btnCancelBatch.addEventListener('click', async () => {
-    btnCancelBatch.textContent = 'Cancelling\u2026';
+    btnCancelBatch.textContent = 'Cancelling...';
     btnCancelBatch.disabled = true;
-    try {
-      await fetch('/batch/cancel', { method: 'POST' });
-      addLog('\u26a0 Cancel requested \u2014 stopping after current product\u2026', 'err');
-    } catch (e) { /* ignore */ }
+    try { await fetch('/batch/cancel', { method: 'POST' }); } catch (e) {}
+    addLog('Cancel requested — stopping after current product...', 'err');
   });
 
-  btnBatch.addEventListener('click', () => {
+  function startBatch() {
     const folderPath        = folderPathInput.value.trim().replace(/^['"]|['"]$/g, '');
-    const customInstruction = (batchCustomInput.value || '').trim();
-    if (!folderPath) return;
+    const customInstruction = customInput.value.trim();
+    if (!folderPath || selectedShots.size === 0) return;
 
     logEntries.innerHTML = '';
     batchResultsEl.innerHTML = '';
@@ -1106,14 +1403,15 @@
     Object.keys(batchFolderMap).forEach(k => delete batchFolderMap[k]);
 
     batchLog.classList.add('visible');
-    btnBatch.disabled = true;
-    btnBatch.textContent = 'Processing\u2026';
+    btnGenerate.disabled = true;
+    btnGenerate.textContent = 'Processing...';
     btnCancelBatch.classList.add('visible');
     btnCancelBatch.disabled = false;
     btnCancelBatch.textContent = 'Cancel Batch';
 
     let batchFinished = false;
-    let url = `/batch?folderPath=${encodeURIComponent(folderPath)}`;
+    const shotsParam = encodeURIComponent(JSON.stringify([...selectedShots]));
+    let url = `/batch?folderPath=${encodeURIComponent(folderPath)}&shots=${shotsParam}&provider=${encodeURIComponent(selectedProvider)}`;
     if (customInstruction) url += `&customInstruction=${encodeURIComponent(customInstruction)}`;
     const src = new EventSource(url);
 
@@ -1121,44 +1419,35 @@
       const msg = JSON.parse(e.data);
 
       if (msg.type === 'start') {
-        addLog(`Processing ${msg.total} product(s)\u2026`, 'info');
+        addLog(`Processing ${msg.total} product(s), ${msg.shots?.length || 0} shot(s) each...`, 'info');
 
       } else if (msg.type === 'product_start') {
-        addLog(`\n\ud83d\udce6  ${msg.product}`, 'title');
+        addLog(`\n${msg.product}`, 'title');
         addBatchProductSection(msg.product, msg.productFolder);
 
       } else if (msg.type === 'product_error') {
         addLog(`  \u2717 ${msg.message}`, 'err');
 
       } else if (msg.type === 'angle_start') {
-        addLog(`  \u23f3 ${msg.label}\u2026`);
+        addLog(`  ${msg.label}...`);
         activateBatchPlaceholder(msg.product, msg.angle);
 
       } else if (msg.type === 'angle_done') {
-        addLog(`  \u2713 ${msg.label} saved`, 'ok');
+        addLog(`  \u2713 ${msg.label}`, 'ok');
         renderBatchAngleCard(msg.product, msg.angle, msg.label, msg.savedTo);
 
       } else if (msg.type === 'angle_error') {
         addLog(`  \u2717 ${msg.angle}: ${msg.message}`, 'err');
         markBatchAngleFailed(msg.product, msg.angle);
 
-      } else if (msg.type === 'model_start') {
-        addLog(`  \u23f3 Model Shot\u2026`);
-        activateBatchPlaceholder(msg.product, 'model');
-
-      } else if (msg.type === 'model_done') {
-        addLog(`  \u2713 Model Shot saved`, 'ok');
-        renderBatchModelCard(msg.product, msg.savedTo);
-
-      } else if (msg.type === 'model_error') {
-        addLog(`  \u2717 Model: ${msg.message}`, 'err');
-        markBatchAngleFailed(msg.product, 'model');
+      } else if (msg.type === 'usage') {
+        updateCostBar(msg.usage);
 
       } else if (msg.type === 'product_done') {
-        addLog(`  \u2705 Done`, 'ok');
+        addLog(`  Done`, 'ok');
 
       } else if (msg.type === 'cancelled') {
-        addLog(`\n\u26d4 ${msg.message}`, 'err');
+        addLog(`\n${msg.message}`, 'err');
         batchFinished = true;
         finishBatch(src);
 
@@ -1168,19 +1457,18 @@
         finishBatch(src);
 
       } else if (msg.type === 'done') {
-        addLog('\n\ud83c\udf89 Batch complete!', 'ok');
+        addLog('\nBatch complete!', 'ok');
         batchFinished = true;
         finishBatch(src);
       }
     };
 
     src.onerror = () => {
-      if (!batchFinished) addLog('Connection lost \u2014 is the server running?', 'err');
+      if (!batchFinished) addLog('Connection lost — is the server running?', 'err');
       finishBatch(src);
     };
-  });
+  }
 
-  // ── Batch image grid helpers ───────────────────────────────────────────────
   function cardId(productName, angleId) {
     return `bcard-${productName.replace(/[^a-zA-Z0-9]/g, '_')}-${angleId}`;
   }
@@ -1199,105 +1487,23 @@
     const grid = document.createElement('div');
     grid.className = 'batch-angles-grid';
 
-    ANGLE_META.forEach(({ id, label }) => {
+    [...selectedShots].forEach(shotId => {
+      const shot = shotCatalog[shotId];
+      if (!shot) return;
       const ph = document.createElement('div');
-      ph.className = 'batch-angle-pending queued' + (id === 'detail' ? ' detail-placeholder' : '');
-      ph.id = cardId(productName, id);
-
+      ph.className = 'batch-angle-pending queued';
+      ph.id = cardId(productName, shotId);
       const spinner = document.createElement('div');
       spinner.className = 'mini-spinner';
       const lbl = document.createElement('span');
-      lbl.textContent = label;
+      lbl.textContent = shot.label;
       ph.append(spinner, lbl);
       grid.appendChild(ph);
     });
 
     section.append(titleEl, grid);
-
-    // Model shot placeholder — full-width row below the angles grid
-    const modelPh = document.createElement('div');
-    modelPh.className = 'batch-angle-pending queued';
-    modelPh.id = cardId(productName, 'model');
-    modelPh.style.cssText = 'aspect-ratio:unset;padding:18px;flex-direction:row;gap:10px;';
-    const modelSpinner = document.createElement('div');
-    modelSpinner.className = 'mini-spinner';
-    const modelLbl = document.createElement('span');
-    modelLbl.textContent = 'Model Shot';
-    modelPh.append(modelSpinner, modelLbl);
-    section.appendChild(modelPh);
-
     batchResultsEl.appendChild(section);
     batchResultsEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }
-
-  function renderBatchModelCard(productName, savedTo) {
-    const placeholder = document.getElementById(cardId(productName, 'model'));
-    if (!placeholder) return;
-
-    const productFolder = batchFolderMap[productName] || '';
-
-    const card = document.createElement('div');
-    card.className = 'result-card';
-    card.id = cardId(productName, 'model');
-    card.style.display = 'flex';
-    card.style.flexDirection = 'row';
-    card.style.gap = '0';
-
-    const labelEl = document.createElement('div');
-    labelEl.className = 'result-card-label model-label';
-    labelEl.style.writingMode = 'vertical-lr';
-    labelEl.style.padding = '14px 10px';
-    labelEl.style.borderBottom = 'none';
-    labelEl.style.borderRight = '1px solid var(--border)';
-    labelEl.textContent = 'Model Shot';
-
-    const img = document.createElement('img');
-    img.src = savedTo ? `/file?path=${encodeURIComponent(savedTo)}` : '';
-    img.alt = 'Model Shot';
-    img.style.cssText = 'width:200px;height:200px;object-fit:cover;flex-shrink:0;transition:opacity 0.2s;';
-
-    const right = document.createElement('div');
-    right.style.cssText = 'flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding:10px 12px;gap:6px;';
-
-    const dlBtn = document.createElement('button');
-    dlBtn.className = 'btn-dl';
-    dlBtn.textContent = '\u2b07 Download';
-    dlBtn.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = img.src;
-      a.download = `${productName}_model.png`;
-      a.click();
-    });
-
-    const retryBtn = document.createElement('button');
-    retryBtn.className = 'btn-retry';
-    retryBtn.textContent = '\u21ba Retry';
-    retryBtn.addEventListener('click', async () => {
-      retryBtn.disabled = true;
-      retryBtn.textContent = '\u21ba Retrying\u2026';
-      img.style.opacity = '0.35';
-      try {
-        const res = await fetch('/retry-angle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productFolder, angleId: 'model' }),
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Retry failed.');
-        img.src = `data:image/png;base64,${data.base64}`;
-        retryBtn.textContent = '\u21ba Retry';
-      } catch (err) {
-        retryBtn.textContent = '\u2717 Failed';
-        setTimeout(() => { retryBtn.textContent = '\u21ba Retry'; }, 2500);
-      } finally {
-        retryBtn.disabled = false;
-        img.style.opacity = '';
-      }
-    });
-
-    right.append(dlBtn, retryBtn);
-    card.append(labelEl, img, right);
-    placeholder.replaceWith(card);
   }
 
   function activateBatchPlaceholder(productName, angleId) {
@@ -1310,13 +1516,15 @@
     if (!placeholder) return;
 
     const productFolder = batchFolderMap[productName] || '';
+    const shot = shotCatalog[angleId];
+    const labelCls = shot ? (LABEL_CLASS[shot.category] || 'label-ecommerce') : 'label-ecommerce';
 
     const card = document.createElement('div');
-    card.className = 'result-card' + (angleId === 'detail' ? ' detail-card' : '');
+    card.className = 'result-card';
     card.id = cardId(productName, angleId);
 
     const labelEl = document.createElement('div');
-    labelEl.className = 'result-card-label ecommerce-label';
+    labelEl.className = `result-card-label ${labelCls}`;
     labelEl.textContent = label;
 
     const img = document.createElement('img');
@@ -1328,7 +1536,7 @@
 
     const dlBtn = document.createElement('button');
     dlBtn.className = 'btn-dl';
-    dlBtn.textContent = '\u2b07 Download';
+    dlBtn.textContent = 'Download';
     dlBtn.addEventListener('click', () => {
       const a = document.createElement('a');
       a.href = img.src;
@@ -1338,24 +1546,25 @@
 
     const retryBtn = document.createElement('button');
     retryBtn.className = 'btn-retry';
-    retryBtn.textContent = '\u21ba Retry';
+    retryBtn.textContent = 'Retry';
     retryBtn.addEventListener('click', async () => {
       retryBtn.disabled = true;
-      retryBtn.textContent = '\u21ba Retrying\u2026';
+      retryBtn.textContent = 'Retrying...';
       img.style.opacity = '0.35';
       try {
         const res = await fetch('/retry-angle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productFolder, angleId }),
+          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Retry failed.');
+        if (data.usage) updateCostBar(data.usage);
         img.src = `data:image/png;base64,${data.base64}`;
-        retryBtn.textContent = '\u21ba Retry';
+        retryBtn.textContent = 'Retry';
       } catch (err) {
-        retryBtn.textContent = '\u2717 Failed';
-        setTimeout(() => { retryBtn.textContent = '\u21ba Retry'; }, 2500);
+        retryBtn.textContent = 'Failed';
+        setTimeout(() => { retryBtn.textContent = 'Retry'; }, 2500);
       } finally {
         retryBtn.disabled = false;
         img.style.opacity = '';
@@ -1374,7 +1583,7 @@
     const spinner = el.querySelector('.mini-spinner');
     if (spinner) spinner.style.borderTopColor = 'var(--danger)';
     const lbl = el.querySelector('span');
-    if (lbl) { lbl.style.color = 'var(--danger)'; lbl.textContent = '\u2717 Failed'; }
+    if (lbl) { lbl.style.color = 'var(--danger)'; lbl.textContent = 'Failed'; }
   }
 
   function addLog(text, cls = '') {
@@ -1387,10 +1596,56 @@
 
   function finishBatch(src) {
     src.close();
-    btnBatch.disabled = false;
-    btnBatch.textContent = 'Process Batch Folder';
+    btnGenerate.disabled = false;
+    updateGenerateButton();
     btnCancelBatch.classList.remove('visible');
   }
+
+  // ── Cost tracker ───────────────────────────────────────────────────────────
+  const PROVIDER_COLORS = { gemini: 'gemini', openai: 'openai', nanobana2: 'nanobana2' };
+  const PROVIDER_LABELS = { gemini: 'Gemini', openai: 'OpenAI', nanobana2: 'NB2' };
+
+  function updateCostBar(usage) {
+    if (!usage || !usage.session) return;
+    const s = usage.session;
+
+    // Total
+    document.getElementById('cost-total-value').textContent = `$${s.total.cost.toFixed(3)}`;
+    document.getElementById('cost-total-images').textContent = `${s.total.images} img${s.total.images !== 1 ? 's' : ''}`;
+
+    // Per provider
+    for (const prov of ['gemini', 'openai', 'nanobana2']) {
+      const el = document.getElementById(`cost-${prov}`);
+      if (!el) continue;
+      const data = s[prov] || { images: 0, cost: 0 };
+      el.querySelector('.cost-value').textContent = `$${data.cost.toFixed(3)}`;
+      el.querySelector('.cost-images').textContent = `${data.images}`;
+    }
+  }
+
+  async function refreshUsage() {
+    try {
+      const res = await fetch('/usage');
+      const data = await res.json();
+      updateCostBar(data);
+    } catch (e) {}
+  }
+
+  document.getElementById('cost-reset-btn').addEventListener('click', async () => {
+    await fetch('/usage/reset', { method: 'POST' });
+    refreshUsage();
+  });
+
+  // Poll usage every 5s during idle, and update on every response
+  setInterval(refreshUsage, 5000);
+  refreshUsage();
+
+  // Patch existing handlers to also update cost bar from responses
+  const _origRenderResults = renderResults;
+  // We hook into fetch responses instead — see generate handler
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadCatalog();
 </script>
 </body>
 </html>

@@ -8,8 +8,8 @@ const os           = require('os');
 const { execFile } = require('child_process');
 const sharp        = require('sharp');
 const { GoogleGenAI } = require('@google/genai');
+const OpenAI       = require('openai');
 
-// Prevent unhandled errors from crashing the server
 process.on('uncaughtException', (err) => {
     console.error('[Uncaught Exception]', err.message, err.stack);
 });
@@ -17,44 +17,262 @@ process.on('unhandledRejection', (reason) => {
     console.error('[Unhandled Rejection]', reason);
 });
 
-if (!process.env.GOOGLE_API_KEY) {
-    console.error('ERROR: GOOGLE_API_KEY is not set in your .env file.');
-    process.exit(1);
+const PORT = process.env.PORT || 3000;
+
+// ── Provider clients ───────────────────────────────────────────────────────
+const geminiClient = process.env.GOOGLE_API_KEY ? new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY }) : null;
+const openaiClient = process.env.OPENAI_API_KEY  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+// Which providers are available
+const PROVIDERS = {};
+if (geminiClient) PROVIDERS.gemini    = { label: 'Gemini',          canGenerate: true };
+if (openaiClient) PROVIDERS.openai    = { label: 'OpenAI',          canGenerate: true };
+if (geminiClient) PROVIDERS.nanobana2 = { label: 'Nano Banana 2',   canGenerate: true };
+
+console.log('[Providers]', Object.keys(PROVIDERS).join(', ') || 'NONE — add API keys to .env');
+
+// ── Cost tracking ─────────────────────────────────────────────────────────
+const COST_PER_IMAGE = {
+    gemini:    0.134,   // Nano Banana Pro @ 1K
+    nanobana2: 0.101,   // Nano Banana 2 @ 2K
+    openai:    0.133,   // GPT Image 1.5 High @ 1024x1024
+};
+
+const usageStats = {
+    session: {
+        gemini:    { images: 0, cost: 0 },
+        nanobana2: { images: 0, cost: 0 },
+        openai:    { images: 0, cost: 0 },
+        total:     { images: 0, cost: 0 },
+    },
+    history: [],  // last 50 entries
+};
+
+function trackUsage(provider, shotId) {
+    const cost = COST_PER_IMAGE[provider] || 0;
+    if (!usageStats.session[provider]) usageStats.session[provider] = { images: 0, cost: 0 };
+    usageStats.session[provider].images++;
+    usageStats.session[provider].cost += cost;
+    usageStats.session.total.images++;
+    usageStats.session.total.cost += cost;
+
+    const entry = {
+        provider,
+        shotId,
+        cost,
+        timestamp: Date.now(),
+    };
+    usageStats.history.unshift(entry);
+    if (usageStats.history.length > 50) usageStats.history.length = 50;
+
+    console.log(`[Cost] +$${cost.toFixed(3)} (${provider}/${shotId}) — session total: $${usageStats.session.total.cost.toFixed(3)} (${usageStats.session.total.images} images)`);
+    return entry;
 }
 
-const PORT = process.env.PORT || 3000;
-const ai   = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
-
-const ANGLES = [
-    {
-        id: 'front',
-        label: 'Front View',
-        instruction: 'Straight-on front view. Product faces directly at camera, centered. Full product visible.',
+// ── Shot definitions ───────────────────────────────────────────────────────
+// Each shot has an id, label, category, and a function that builds the prompt
+const SHOT_CATALOG = {
+    // ── Ecommerce ──
+    ecom_hero: {
+        id: 'ecom_hero',
+        label: 'Hero / Front',
+        category: 'ecommerce',
+        description: 'Clean front-facing product shot on pure white',
     },
-    {
-        id: 'elevated',
-        label: '3/4 Elevated',
-        instruction: '3/4 elevated angle.',
+    ecom_angle: {
+        id: 'ecom_angle',
+        label: '45° Angle',
+        category: 'ecommerce',
+        description: 'Three-quarter angle showing depth and dimension',
     },
-    {
-        id: 'band',
-        label: 'Band Focus',
-        instruction: 'Band/shank focus shot.',
-    },
-    {
-        id: 'detail',
+    ecom_detail: {
+        id: 'ecom_detail',
         label: 'Detail Close-up',
-        instruction: 'Extreme macro close-up.',
+        category: 'ecommerce',
+        description: 'Extreme macro of the finest detail area',
     },
-];
+    ecom_flat: {
+        id: 'ecom_flat',
+        label: 'Flat Lay',
+        category: 'ecommerce',
+        description: 'Bird\'s eye flat lay on white surface',
+    },
+    ecom_stand: {
+        id: 'ecom_stand',
+        label: 'Display Stand',
+        category: 'ecommerce',
+        description: 'On a branded display stand with warm backdrop',
+    },
+    ecom_group: {
+        id: 'ecom_group',
+        label: 'Scale / Context',
+        category: 'ecommerce',
+        description: 'Jewelry next to a subtle size reference',
+    },
+
+    // ── Model ──
+    model_wrist: {
+        id: 'model_wrist',
+        label: 'Wrist / Hand',
+        category: 'model',
+        description: 'Jewelry on wrist or hand, tight crop',
+    },
+    model_neck: {
+        id: 'model_neck',
+        label: 'Neck / Décolletage',
+        category: 'model',
+        description: 'Necklace on neck, collarbone framing',
+    },
+    model_ear: {
+        id: 'model_ear',
+        label: 'Ear Close-up',
+        category: 'model',
+        description: 'Earring on ear, jawline framing',
+    },
+    model_lifestyle: {
+        id: 'model_lifestyle',
+        label: 'Lifestyle',
+        category: 'model',
+        description: 'Model wearing jewelry in lifestyle context',
+    },
+
+    // ── Marble / Surface ──
+    marble: {
+        id: 'marble',
+        label: 'Marble Surface',
+        category: 'marble',
+        description: 'Luxury marble surface with soft props',
+    },
+    marble_dark: {
+        id: 'marble_dark',
+        label: 'Dark Marble',
+        category: 'marble',
+        description: 'Moody dark marble with dramatic lighting',
+    },
+};
+
+// ── Prompt builders per shot ───────────────────────────────────────────────
+function buildShotPrompt(shotId, customInstruction, hasAnchor = false) {
+    const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.';
+
+    // When an anchor reference is present, add IP-Adapter-style consistency conditioning
+    const anchorBlock = hasAnchor
+        ? `\nCONSISTENCY ANCHOR: The LAST reference image is a clean studio product shot I already generated of this exact jewelry piece. Treat it as your visual ground truth. Every stone count, every prong, every metal tone, every proportion in your output MUST match this anchor image exactly. If there is any ambiguity between the raw reference photos and the anchor, defer to the anchor — it is the canonical representation of this piece.\n`
+        : '';
+
+    const scenes = {
+        ecom_hero: `SCENE: Professional ecommerce hero shot. Pure white (#FFFFFF) seamless background. The jewelry is centered, occupying approximately 65% of the frame. Camera is at a slight elevation (15–20°) to show the decorative face. Even, diffused studio lighting from two softboxes at 45° angles, creating clean specular highlights on metal surfaces and brilliant stone reflections. Subtle drop shadow beneath the piece for grounding. No props, no distractions — the piece is the entire composition.
+CAMERA: 100mm macro lens, f/8, focus-stacked for edge-to-edge sharpness. Color-accurate white balance (5500K). Shot on medium format digital for maximum detail.`,
+
+        ecom_angle: `SCENE: Three-quarter angle product shot. Pure white (#FFFFFF) seamless background. Camera positioned at 45° to the front face, slightly elevated (20–25°), revealing the depth, profile, and side construction of the piece. This angle shows how the jewelry looks in three dimensions — the curve of a bangle, the height of a setting, the thickness of metalwork. Same even studio lighting with clean highlights.
+CAMERA: 100mm macro, f/8, focus-stacked. The viewer should feel they can reach in and pick up the piece.`,
+
+        ecom_detail: `SCENE: Extreme macro close-up. Camera is 1–3 cm from the most intricate area of the jewelry — the center stone and its setting, the finest filigree, or the most detailed metalwork. Fill the entire frame with this detail. White or neutral surface beneath. Razor-sharp focus on the subject with natural bokeh softening the edges. This shot reveals craftsmanship — individual prongs, stone facets, metal grain, pavé precision.
+CAMERA: Dedicated macro lens at 1:1 magnification, f/5.6 for shallow depth, ring light for even illumination without harsh shadows. Shot so close the viewer can count individual stones.`,
+
+        ecom_flat: `SCENE: Overhead flat lay on pure white surface. Camera directly above (90° bird's eye). The jewelry is laid flat, centered, with its decorative face pointing up. For bangles/bracelets: circular shape fully visible. For necklaces: arranged in an elegant drape or gentle curve. For rings: face up, slightly angled. Even, shadowless lighting from a large overhead softbox. Clean, minimal, editorial.
+CAMERA: 85mm, f/8, tripod-mounted directly overhead. Perfect symmetry in composition.`,
+
+        ecom_stand: `SCENE: House of Mina brand display presentation. Look at the reference photo(s) to determine the jewelry type, then choose the CORRECT display:
+- Bangles / cuffs / bracelets: upright on a velvet cushion roll or half-cylinder stand, resting naturally with the decorative face toward camera. NEVER use a T-bar or hanging stand for bangles.
+- Rings: on a slim velvet cone or small cushion, tilted slightly toward camera.
+- Necklaces / chokers: draped over a fabric neck bust or laid on a velvet tray in an elegant curve.
+- Earrings: on a small padded earring card or low T-bar stand.
+- Maang tikka / headpieces: laid flat on a velvet tray or silk fabric.
+
+The stand/display is elegant and minimal, in matte cream, soft gold, or deep velvet. Background is warm ivory/cream with a hint of texture (linen or fine paper). Soft, warm window-style light from the upper left creates gentle shadows and a luxurious mood. The decorative face of the jewelry faces the camera. The display should look natural — the jewelry should sit the way it would in a real boutique.
+CAMERA: 85mm f/2.8, slightly shallow depth of field to separate the piece from the background. Warm color temperature (5800K).`,
+
+        ecom_group: `SCENE: Scale and context shot. The jewelry is placed on a pure white surface alongside a subtle, universally understood size reference — a single fresh rose petal, a small velvet pouch, or an elegant hand mirror. The reference object is secondary and slightly out of focus. The jewelry remains the hero. This shot communicates real-world scale and presence.
+CAMERA: 85mm, f/4, with the jewelry in sharp focus and the reference object in soft focus behind or beside it.`,
+
+        model_wrist: `SCENE: The jewelry is worn on the wrist/hand of a model. For bangles and bracelets: worn snugly on the wrist, sitting flush against skin with the outer decorative face toward the camera. For rings: worn on the ring finger, hand relaxed.
+
+MODEL & POSE:
+- Woman in her early 20s, warm South Asian skin tone, natural skin texture, clean manicure with nude or soft pink nails
+- Arm extended forward, elbow slightly bent
+- Wrist level or slightly lowered, fingers pointing DOWNWARD and loosely relaxed
+- Back of hand faces the camera, palm faces away
+- Do NOT raise the hand with fingers pointing up, do NOT show the palm
+
+FRAMING: Tight crop showing only the hand, wrist, and a few inches of forearm. No face, no shoulder, no torso.
+LIGHTING: Single soft key light from above-left, warm neutral blurred backdrop (creamy beige or soft gold), 85mm f/1.4 equivalent depth of field. Subtle film grain. The skin should glow warmly.`,
+
+        model_neck: `SCENE: The jewelry is worn around the neck of a model. The necklace or choker sits naturally on the collarbone/décolletage area.
+
+MODEL & POSE:
+- Woman in her early 20s, warm South Asian skin tone, natural skin, elegant bone structure
+- Head tilted very slightly to one side, chin slightly lifted
+- Wearing a simple, solid-color top or bare shoulders (nothing competing with the jewelry)
+- Hair pulled back or swept to one side to fully reveal the necklace
+
+FRAMING: From mid-chest to just below the chin. The necklace is the clear focal point. Jawline and neck visible for context but the jewelry dominates.
+LIGHTING: Soft, warm key light from above-right, gentle fill from the left. Warm neutral backdrop. 85mm f/1.8, shallow depth. The skin glows, the metal catches light beautifully.`,
+
+        model_ear: `SCENE: The earring is worn on the ear of a model. Close-up of the ear, jawline, and a hint of neck.
+
+MODEL & POSE:
+- Woman in her early 20s, warm South Asian skin tone, clean skin, elegant jawline
+- Head turned slightly (three-quarter profile) to present the ear naturally
+- Hair tucked behind the ear or swept up to fully reveal the earring
+- Expression serene, mouth relaxed (if lips are visible at edge of frame)
+
+FRAMING: Tight crop on the ear and surrounding area. The earring is the clear hero. Show enough of the jaw and neck for anatomical context.
+LIGHTING: Soft key light from the front-left, gentle rim light to separate from background. Warm blurred backdrop. 100mm f/2, very shallow depth — the earring is razor-sharp, everything else falls off softly.`,
+
+        model_lifestyle: `SCENE: Lifestyle editorial shot. The model is wearing the jewelry in a warm, luxurious setting — think golden hour light, soft furnishings, or a beautiful window. The mood is aspirational, elegant, and distinctly South Asian-luxe.
+
+MODEL & POSE:
+- Woman in her early 20s, warm South Asian skin tone, styled beautifully but not overly made up
+- Natural, candid-feeling pose — adjusting the jewelry, looking away from camera, or mid-movement
+- Wearing complementary but simple clothing that doesn't compete (solid colors, elegant draping)
+
+FRAMING: Medium shot (waist up or three-quarter). The jewelry should be clearly visible and prominent despite the wider framing. Environmental context adds mood without overwhelming.
+LIGHTING: Warm, natural-feeling light (golden hour or large window). Slight haze or warmth in the atmosphere. 50mm f/1.8, cinematic depth of field. Slight film grain for editorial feel.`,
+
+        marble: `SCENE: Luxury surface shot. The jewelry rests on a white or cream Carrara marble surface with soft, natural grey veining. Beside the jewelry (not touching): one or two minimal props — a small sprig of dried flowers, a fragment of silk ribbon, or a tiny gold-rimmed dish. Props are muted and secondary. The composition is editorial, airy, and luxurious.
+LIGHTING: Soft, warm natural light from a large window to the left. Gentle shadows. The marble surface has a slight sheen. Warm color palette overall.
+CAMERA: 45° angle, 85mm f/2.8, the jewelry is in perfect focus, props and marble veining fall off softly. The feeling is a luxury magazine editorial spread.`,
+
+        marble_dark: `SCENE: Dramatic dark surface shot. The jewelry rests on dark emperador or nero marquina marble — deep brown-black with gold or white veining. The mood is dramatic, moody, and high-end. Minimal props if any — perhaps a single dark velvet fold or a matte black box edge barely visible. The jewelry catches all the light and pops against the dark surface.
+LIGHTING: Single focused light source from above-right, creating dramatic highlights on the metal and stones while the marble stays dark and moody. Deep shadows, high contrast. The gold of the jewelry glows against the darkness.
+CAMERA: Low angle (15–20°), 100mm f/2.8, shallow depth. Cinematic, editorial, powerful. Think luxury brand campaign.`,
+    };
+
+    const scene = scenes[shotId] || scenes.ecom_hero;
+
+    const parts = [
+        base,
+        anchorBlock,
+        scene,
+        '',
+        'OUTPUT: Square 1:1 aspect ratio. Photorealistic — indistinguishable from a real photograph. No AI artifacts, no floating elements, no impossible reflections.',
+        ...(customInstruction ? [`\nADDITIONAL DIRECTION: ${customInstruction}`] : []),
+    ];
+
+    return parts.join('\n');
+}
 
 const app    = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// ── Serve available providers + shot catalog to frontend ────────────────────
+app.get('/providers', (_req, res) => res.json(PROVIDERS));
+app.get('/shots', (_req, res) => res.json(SHOT_CATALOG));
+app.get('/usage', (_req, res) => res.json(usageStats));
+app.post('/usage/reset', (_req, res) => {
+    for (const key of Object.keys(usageStats.session)) {
+        usageStats.session[key] = { images: 0, cost: 0 };
+    }
+    usageStats.history = [];
+    res.json({ reset: true });
+});
+app.get('/cost-rates', (_req, res) => res.json(COST_PER_IMAGE));
 
 // ── Serve generated files from disk ─────────────────────────────────────────
 app.get('/file', (req, res) => {
@@ -78,47 +296,63 @@ const cancelHandler = (req, res) => {
 app.post('/cancel-batch', cancelHandler);
 app.post('/batch/cancel', cancelHandler);
 
-// ── Single / multi-image generation endpoint ────────────────────────────────
+// ── Single product generation ───────────────────────────────────────────────
 app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No images uploaded.' });
 
-    const outputType        = req.body.outputType || 'ecommerce';
+    const shotIds           = JSON.parse(req.body.shots || '[]');
     const customInstruction = (req.body.customInstruction || '').trim() || null;
+    const provider          = (req.body.provider || 'gemini').trim();
+
+    if (shotIds.length === 0) return res.status(400).json({ error: 'No shots selected.' });
 
     const imageInputs = await Promise.all(req.files.map(async (f) => {
         const buf = await toJpeg(f.originalname || '', f.buffer);
         return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
     }));
 
-    const primary = imageInputs[0];
-
     try {
-        const results = {};
+        console.log(`[Generate] ${shotIds.length} shot(s) via ${provider}: ${shotIds.join(', ')}`);
 
-        if (outputType === 'ecommerce' || outputType === 'both') {
-            // Generate front first, then pass it as reference to other angles for consistency
-            const frontData = await generateEcommerceShot(imageInputs, customInstruction, ANGLES[0]);
-            const frontRef  = { base64: frontData, mimeType: 'image/png' };
+        // ── Anchor-first consistency pipeline ──
+        // Always generate a clean hero/product shot first as the visual anchor.
+        // This anchor is then fed as a reference into EVERY subsequent shot
+        // (ecom, model, marble — all of them), similar to how ComfyUI's
+        // IP-Adapter conditions all generations from a single reference.
 
-            const [elevatedData, bandData, detailData] = await Promise.all([
-                generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[1]),
-                generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[2]),
-                generateEcommerceShot([...imageInputs, frontRef], customInstruction, ANGLES[3]),
-            ]);
+        const results = [];
+        let anchorRef = null;
 
-            results.ecommerce = [
-                { id: ANGLES[0].id, label: ANGLES[0].label, data: frontData    },
-                { id: ANGLES[1].id, label: ANGLES[1].label, data: elevatedData },
-                { id: ANGLES[2].id, label: ANGLES[2].label, data: bandData     },
-                { id: ANGLES[3].id, label: ANGLES[3].label, data: detailData   },
-            ];
+        // Determine anchor: use ecom_hero if selected, otherwise first ecom shot, otherwise first shot
+        const anchorId = shotIds.includes('ecom_hero') ? 'ecom_hero'
+            : shotIds.find(id => id.startsWith('ecom_'))
+            || shotIds[0];
+
+        // Generate anchor shot (no anchor reference for the anchor itself)
+        console.log(`[Anchor] Generating ${anchorId} as consistency anchor via ${provider}...`);
+        const anchorShot = SHOT_CATALOG[anchorId];
+        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
+        anchorRef = { base64: anchorData, mimeType: 'image/png' };
+        results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorData });
+
+        // Generate all remaining shots in parallel, ALL receiving the anchor
+        const remaining = shotIds.filter(id => id !== anchorId);
+
+        if (remaining.length > 0) {
+            const refsWithAnchor = [...imageInputs, anchorRef];
+            const parallel = await Promise.all(remaining.map(async (shotId) => {
+                const shot = SHOT_CATALOG[shotId];
+                if (!shot) return null;
+                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider);
+                return { id: shotId, label: shot.label, category: shot.category, data };
+            }));
+            results.push(...parallel.filter(Boolean));
         }
-        if (outputType === 'model' || outputType === 'both') {
-            const raw = await generateModelShot(imageInputs, customInstruction);
-            results.model = raw;
-        }
 
-        res.json({ success: true, results });
+        // Sort results in the order they were requested
+        const ordered = shotIds.map(id => results.find(r => r.id === id)).filter(Boolean);
+
+        res.json({ success: true, results: { shots: ordered }, usage: usageStats });
     } catch (err) {
         console.error('[Generate Error]', err?.message || err);
         const safetyBlocked = err?.message?.toLowerCase().includes('safety');
@@ -130,12 +364,13 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     }
 });
 
-// ── Retry single angle ──────────────────────────────────────────────────────
+// ── Retry single shot ───────────────────────────────────────────────────────
 app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No images uploaded.' });
 
-    const angleId           = req.body.angleId;
+    const shotId            = req.body.angleId;
     const customInstruction = (req.body.customInstruction || '').trim() || null;
+    const provider          = (req.body.provider || 'gemini').trim();
 
     const imageInputs = await Promise.all(req.files.map(async (f) => {
         const buf = await toJpeg(f.originalname || '', f.buffer);
@@ -143,24 +378,13 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     }));
 
     try {
-        // Model shot retry
-        if (angleId === 'model') {
-            const imageData = await generateModelShot(imageInputs, customInstruction);
-            return res.json({ success: true, imageData });
-        }
+        const shot = SHOT_CATALOG[shotId];
+        if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
-        const angle = ANGLES.find(a => a.id === angleId);
-        if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
-
-        const frontRefBase64 = (req.body.frontRef || '').trim().replace(/^data:image\/\w+;base64,/, '');
-        const refsForAngle = angleId !== 'front' && frontRefBase64
-            ? [...imageInputs, { base64: frontRefBase64, mimeType: 'image/png' }]
-            : imageInputs;
-
-        const imageData = await generateEcommerceShot(refsForAngle, customInstruction, angle);
-        res.json({ success: true, imageData });
+        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider);
+        res.json({ success: true, imageData, usage: usageStats });
     } catch (err) {
-        console.error('[Generate-Angle Error]', err?.message || err);
+        console.error('[Retry Error]', err?.message || err);
         res.status(500).json({ error: err.message || 'Generation failed.' });
     }
 });
@@ -176,10 +400,13 @@ app.get('/batch', async (req, res) => {
 
     const folderPath        = (req.query.folderPath || '').trim().replace(/^['"]|['"]$/g, '');
     const customInstruction = (req.query.customInstruction || '').trim() || null;
+    const shotIds           = JSON.parse(req.query.shots || '[]');
+    const provider          = (req.query.provider || 'gemini').trim();
 
     if (!folderPath) { send({ type: 'error', message: 'No folder path provided.' }); return res.end(); }
     if (!fs.existsSync(folderPath)) { send({ type: 'error', message: `Folder not found: ${folderPath}` }); return res.end(); }
-    if (!fs.statSync(folderPath).isDirectory()) { send({ type: 'error', message: 'That path is a file, not a folder. Please provide a folder containing product subfolders.' }); return res.end(); }
+    if (!fs.statSync(folderPath).isDirectory()) { send({ type: 'error', message: 'That path is a file, not a folder.' }); return res.end(); }
+    if (shotIds.length === 0) { send({ type: 'error', message: 'No shots selected.' }); return res.end(); }
 
     const productDirs = fs.readdirSync(folderPath, { withFileTypes: true })
         .filter(d => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'ecommerce' && d.name !== 'output')
@@ -193,7 +420,7 @@ app.get('/batch', async (req, res) => {
     activeBatchId = Date.now().toString();
     batchCancelled = false;
 
-    send({ type: 'start', total: productDirs.length, batchId: activeBatchId });
+    send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds });
 
     for (const { name: productName, fullPath: productFolder } of productDirs) {
         if (batchCancelled) {
@@ -222,17 +449,24 @@ app.get('/batch', async (req, res) => {
             const outDir = path.join(folderPath, 'output', productName);
             fs.mkdirSync(outDir, { recursive: true });
 
-            // ── Generate front first (serial) ──
-            let generatedFront = null;
-            send({ type: 'angle_start', product: productName, angle: 'front', label: ANGLES[0].label });
+            // ── Anchor-first consistency pipeline ──
+            const anchorId = shotIds.includes('ecom_hero') ? 'ecom_hero'
+                : shotIds.find(id => id.startsWith('ecom_'))
+                || shotIds[0];
+
+            let anchorRef = null;
+            const anchorShot = SHOT_CATALOG[anchorId];
+
+            send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
             try {
-                const frontBase64 = await generateEcommerceShot(imageInputs, customInstruction, ANGLES[0]);
-                generatedFront = frontBase64;
-                const outPath = path.join(outDir, 'front.png');
-                fs.writeFileSync(outPath, Buffer.from(frontBase64, 'base64'));
-                send({ type: 'angle_done', product: productName, angle: 'front', label: ANGLES[0].label, savedTo: outPath });
+                const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
+                anchorRef = { base64: b64, mimeType: 'image/png' };
+                const outPath = path.join(outDir, `${anchorId}.png`);
+                fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
+                send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: outPath });
+                send({ type: 'usage', usage: usageStats });
             } catch (err) {
-                send({ type: 'angle_error', product: productName, angle: 'front', message: err.message });
+                send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
             }
 
             if (batchCancelled) {
@@ -241,46 +475,29 @@ app.get('/batch', async (req, res) => {
                 break;
             }
 
-            // ── Generate remaining angles + model in parallel (front ref for consistency) ──
-            const refsForAngles = generatedFront
-                ? [...imageInputs, { base64: generatedFront, mimeType: 'image/png' }]
-                : imageInputs;
+            // All remaining shots get the anchor reference
+            const remaining = shotIds.filter(id => id !== anchorId);
+            const refsWithAnchor = anchorRef ? [...imageInputs, anchorRef] : imageInputs;
+            const hasAnchor = !!anchorRef;
 
-            for (const a of ANGLES.slice(1)) {
-                send({ type: 'angle_start', product: productName, angle: a.id, label: a.label });
+            for (const shotId of remaining) {
+                const shot = SHOT_CATALOG[shotId];
+                if (!shot) continue;
+                send({ type: 'angle_start', product: productName, angle: shotId, label: shot.label });
             }
-            send({ type: 'model_start', product: productName });
 
-            const parallelTasks = [
-                generateEcommerceShot(refsForAngles, customInstruction, ANGLES[1])
+            const parallelTasks = remaining.map(shotId => {
+                const shot = SHOT_CATALOG[shotId];
+                if (!shot) return Promise.resolve();
+                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider)
                     .then(b64 => {
-                        const p = path.join(outDir, 'elevated.png');
+                        const p = path.join(outDir, `${shotId}.png`);
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-                        send({ type: 'angle_done', product: productName, angle: 'elevated', label: ANGLES[1].label, savedTo: p });
+                        send({ type: 'angle_done', product: productName, angle: shotId, label: shot.label, savedTo: p });
+                        send({ type: 'usage', usage: usageStats });
                     })
-                    .catch(err => send({ type: 'angle_error', product: productName, angle: 'elevated', message: err.message })),
-                generateEcommerceShot(refsForAngles, customInstruction, ANGLES[2])
-                    .then(b64 => {
-                        const p = path.join(outDir, 'band.png');
-                        fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-                        send({ type: 'angle_done', product: productName, angle: 'band', label: ANGLES[2].label, savedTo: p });
-                    })
-                    .catch(err => send({ type: 'angle_error', product: productName, angle: 'band', message: err.message })),
-                generateEcommerceShot(refsForAngles, customInstruction, ANGLES[3])
-                    .then(b64 => {
-                        const p = path.join(outDir, 'detail.png');
-                        fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-                        send({ type: 'angle_done', product: productName, angle: 'detail', label: ANGLES[3].label, savedTo: p });
-                    })
-                    .catch(err => send({ type: 'angle_error', product: productName, angle: 'detail', message: err.message })),
-                generateModelShot(imageInputs, customInstruction)
-                    .then(modelB64 => {
-                        const p = path.join(outDir, 'model.png');
-                        fs.writeFileSync(p, Buffer.from(modelB64, 'base64'));
-                        send({ type: 'model_done', product: productName, savedTo: p });
-                    })
-                    .catch(err => send({ type: 'model_error', product: productName, message: err.message })),
-            ];
+                    .catch(err => send({ type: 'angle_error', product: productName, angle: shotId, message: err.message }));
+            });
 
             await Promise.all(parallelTasks);
         } catch (err) {
@@ -304,10 +521,14 @@ app.get('/batch', async (req, res) => {
     res.end();
 });
 
-// ── Batch retry single angle ────────────────────────────────────────────────
+// ── Batch retry single shot ─────────────────────────────────────────────────
 app.post('/retry-angle', upload.none(), async (req, res) => {
-    const { productFolder, angleId } = req.body;
+    const { productFolder, angleId, provider: retryProvider } = req.body;
+    const provider = (retryProvider || 'gemini').trim();
     if (!productFolder || !angleId) return res.status(400).json({ error: 'Missing productFolder or angleId.' });
+
+    const shot = SHOT_CATALOG[angleId];
+    if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
     const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
     const imageFiles = fs.readdirSync(productFolder)
@@ -322,27 +543,11 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
-        if (angleId === 'model') {
-            const raw = await generateModelShot(imageInputs, null);
-            const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), 'model.png');
-            fs.mkdirSync(path.dirname(outPath), { recursive: true });
-            fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
-            return res.json({ success: true, base64: raw });
-        }
-
-        const angle = ANGLES.find(a => a.id === angleId);
-        if (!angle) return res.status(400).json({ error: 'Unknown angle.' });
-
-        const frontPath = path.join(productFolder, '..', 'output', path.basename(productFolder), 'front.png');
-        const refsForAngle = angleId !== 'front' && fs.existsSync(frontPath)
-            ? [...imageInputs, { base64: fs.readFileSync(frontPath).toString('base64'), mimeType: 'image/png' }]
-            : imageInputs;
-
-        const imgBase64 = await generateEcommerceShot(refsForAngle, null, angle);
+        const raw = await generateShot(angleId, imageInputs, null, false, provider);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
-        fs.writeFileSync(outPath, Buffer.from(imgBase64, 'base64'));
-        res.json({ success: true, base64: imgBase64 });
+        fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
+        res.json({ success: true, base64: raw, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
         res.status(500).json({ error: err.message || 'Retry failed.' });
@@ -361,7 +566,7 @@ app.post('/download-zip', async (req, res) => {
 
     const zipBuf = buildZip(entries);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="jewelry-shots.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="house-of-mina-shots.zip"');
     res.send(zipBuf);
 });
 
@@ -405,328 +610,75 @@ function buildZip(entries) {
     return Buffer.concat([...localHeaders, centralBuf, eocd]);
 }
 
-// ── Nano Banana v3 — shoulder/basket crops ──────────────────────────────────
-async function generateShoulderCrops(imageInputs) {
-    const originals = imageInputs.filter(img => img.mimeType === 'image/jpeg');
-    const crops = [];
-    for (const img of originals) {
-        try {
-            const buf = Buffer.from(img.base64, 'base64');
-            const { width, height } = await sharp(buf).metadata();
+// ── Universal shot generator (multi-provider) ───────────────────────────────
+async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini') {
+    const prompt = buildShotPrompt(shotId, customInstruction, hasAnchor);
 
-            // Crop 1 — shoulder zone: bottom 60% of image (band + junction area)
-            const shoulderBuf = await sharp(buf)
-                .extract({
-                    left: Math.floor(width * 0.1),
-                    top:  Math.floor(height * 0.4),
-                    width:  Math.floor(width * 0.8),
-                    height: Math.floor(height * 0.6),
-                })
-                .jpeg({ quality: 95 })
-                .toBuffer();
-            crops.push({ base64: shoulderBuf.toString('base64'), mimeType: 'image/jpeg' });
-
-            // Crop 2 — basket zone: top 55% of image (setting + basket walls)
-            const basketBuf = await sharp(buf)
-                .extract({
-                    left: Math.floor(width * 0.15),
-                    top:  Math.floor(height * 0.05),
-                    width:  Math.floor(width * 0.7),
-                    height: Math.floor(height * 0.55),
-                })
-                .jpeg({ quality: 95 })
-                .toBuffer();
-            crops.push({ base64: basketBuf.toString('base64'), mimeType: 'image/jpeg' });
-        } catch (err) {
-            console.warn('[Crop] Failed for one image, skipping:', err.message);
-        }
+    let result;
+    if (provider === 'openai') {
+        result = await generateWithOpenAI(prompt, imageInputs);
+    } else if (provider === 'nanobana2') {
+        result = await generateWithNanoBana2(prompt, imageInputs);
+    } else {
+        result = await generateWithGemini(prompt, imageInputs);
     }
-    return crops;
+
+    trackUsage(provider, shotId);
+    return result;
 }
 
-// ── Nano Banana v3 — geometry note via Gemini text ──────────────────────────
-async function generateGeometryNote(originals, crops) {
-    const allRefs = [...originals, ...crops];
+async function generateWithGemini(prompt, imageInputs) {
     const parts = [
-        ...allRefs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
-        { text: `You are a jewelry technical analyst. Study these reference photos (full ring views and zoomed close-ups) and write 2–4 plain English sentences describing:
-
-1. SHOULDER: Where the shank meets the basket — does it taper smoothly? Step abruptly? Flare outward? Curve inward? Visible ledge, undercut, or decorative sweep? Symmetrical?
-2. BASKET: Wall shape — straight vertical, tapered cone, tulip, cathedral arch? Cut-outs, windows, or solid walls? Height relative to stone?
-3. GALLERY (if visible): Any scrollwork, milgrain, open or closed gallery visible through the side?
-
-Write 2–4 plain sentences. Be specific about shapes, angles, and structures. Example: "The shank rises into two curved cathedral arches that sweep upward into the basket base on both sides. The basket is a four-prong setting with thin pointed claw prongs and open walls between the prongs." Respond with ONLY the description sentences, nothing else.` },
-    ];
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: [{ parts }],
-        });
-        return response.candidates?.[0]?.content?.parts?.find(p => p.text)?.text?.trim() || null;
-    } catch (err) {
-        console.warn('[GeometryNote] Failed, skipping:', err.message);
-        return null;
-    }
-}
-
-// ── Ecommerce shot ──────────────────────────────────────────────────────────
-async function generateEcommerceShot(imageInputs, customInstruction, angle = ANGLES[0], hasFrontRef = null) {
-    const isDetail   = angle.id === 'detail';
-    const isElevated = angle.id === 'elevated';
-    const isBand     = angle.id === 'band';
-
-    const promptInputs = imageInputs;
-    if (hasFrontRef === null) {
-        hasFrontRef = angle.id !== 'front'
-            && promptInputs.length > 1
-            && promptInputs[promptInputs.length - 1]?.mimeType === 'image/png';
-    }
-    const numOriginalRefs = hasFrontRef ? promptInputs.length - 1 : promptInputs.length;
-    const contextNote = hasFrontRef
-        ? `You have ${promptInputs.length} images. The first ${numOriginalRefs} are original reference photo(s) of the jewelry \u2014 these may be DIFFERENT ANGLES of the same piece (front, side, top, close-up, etc.). Study EVERY reference image carefully: each angle reveals details that other angles may hide (e.g., a side view shows band profile, a top view shows stone arrangement, a close-up shows prong details). Build a COMPLETE mental model of the piece by combining information from ALL angles before generating. The LAST image is the APPROVED RENDERED FRONT VIEW of this exact piece \u2014 match its design exactly.`
-        : numOriginalRefs > 1
-            ? `You have ${numOriginalRefs} reference photos of the jewelry piece. These are DIFFERENT ANGLES of the SAME piece \u2014 front, side, top, close-up, etc. BEFORE generating anything, study EVERY single reference image and combine the information: each angle reveals details hidden in the others. A side view shows the band profile and gallery. A top view shows stone arrangement. A close-up shows prong count and texture. Build a COMPLETE mental model of the piece from ALL angles, then generate.`
-            : 'You have been given one reference photo of the jewelry piece. Study every detail carefully.';
-
-    const sceneBlock = isDetail ? [
-        'SCENE \u2014 MACRO CLOSE-UP:',
-        '- THIS IS AN EXTREME MAGNIFICATION SHOT. Do NOT show the full product.',
-        '- Camera positioned 1\u20132 cm from the surface, filling the entire frame with a single small region.',
-        '- Default subject: the primary center stone and its immediate setting. If there is no center stone, focus on the most intricate area (detailed setting, engraving, or surface texture).',
-        '- The chosen fragment should fill at least 80% of the frame \u2014 crop aggressively.',
-        '- Razor-sharp focus on the closest surface; gentle natural bokeh softens the background.',
-        '- Jewelry rests on clean white surface; slight micro-shadow beneath the piece.',
-        '- No full-product silhouette visible \u2014 this is not a product overview shot.',
-        '- Square 1:1 frame.',
-    ] : isElevated ? [
-        'SCENE \u2014 3/4 ELEVATED:',
-        '- IMPORTANT: This is the SAME ring from the front view, now shown from a 3/4 angle. Do NOT create a different ring.',
-        '- Ring stands UPRIGHT on its shank on a clean white surface \u2014 NOT lying flat.',
-        '- Camera is at roughly the same height as the ring (near table level), angled about 30\u201340 degrees to the side.',
-        '- This is the classic jewelry-store display angle: you see the stone face AND the side profile of the setting simultaneously.',
-        '- ORIGINAL REFERENCES OVERRIDE: For the basket walls, gallery, and shoulder junction, trust the original reference photo(s) over any rendered front view. Those side-geometry details must come from the real photos, not from generic ring priors.',
-        '- The side of the setting, prongs, basket walls, gallery, and upper band are clearly visible \u2014 this shot reveals the 3D architecture that a front view hides.',
-        '- BASKET FIDELITY: Reproduce the exact basket/setting side profile from the reference — its height, wall angle, any side decorations or cut-outs. Do NOT simplify or round off the basket.',
-        '- SHOULDER FIDELITY: Reproduce the exact shoulder-to-basket junction from the reference — the same curve, step, taper break, undercut, or decorative sweep. Do NOT replace it with a generic cathedral shoulder or smooth taper.',
-        '- DO NOT shoot from above. The camera must be near the ring\'s eye-level, NOT looking down at it.',
-        '- Every design detail from the front view (stone count, band pattern, basket shape, setting type, metal color) MUST be visible and identical.',
-        '- Soft, natural drop shadow directly beneath the piece.',
-        '- Background fades to pure white at the edges.',
-        '- No reflections, no gradients, no artificial glow.',
-        '- Square 1:1 frame. White fill any empty areas.',
-    ] : isBand ? [
-        'SCENE \u2014 BAND & BASKET SIDE PROFILE:',
-        hasFrontRef
-            ? `- REFERENCE USAGE: You have ${numOriginalRefs} ORIGINAL reference photo(s) plus one approved rendered front view (the last image). Use the ORIGINAL reference photo(s) as the primary authority for the shoulder shape, band profile, basket structure, and gallery geometry. Use the rendered front view as an additional consistency reference for the approved front-facing design, stone layout, metal color, and finish.`
-            : `- REFERENCE USAGE: Use the ${numOriginalRefs} ORIGINAL reference photo(s) as the authority for the shoulder shape, band profile, basket structure, and gallery geometry in this shot.`,
-        '- The ring stands UPRIGHT on its shank, positioned so the camera sees the SIDE PROFILE of the band AND basket.',
-        '- Specifically: rotate the ring so the camera is looking at the LEFT (or OUTER-LEFT) edge of the band shank.',
-        '- Camera is at TABLE-SURFACE LEVEL (0\u20135 degrees elevation), looking HORIZONTALLY at the SIDE of the ring.',
-        '- BASKET FIDELITY: The basket/setting side wall is clearly visible in this shot. Reproduce its EXACT profile from the reference: its height, the angle of its walls, any decorative cut-outs, claws, or architectural details on the side. Do NOT simplify or invent the basket shape.',
-        '- BAND FIDELITY: Reproduce the exact band profile: width, thickness, taper, shank shape (flat, rounded, knife-edge, etc.), and any surface details (milgrain, channel stones, engravings) visible on the side face.',
-        '- SHOULDER JUNCTION (CRITICAL): The exact point where the shank meets the base of the basket is UNIQUE to this ring. In the reference image(s), locate both shoulders and study their shape precisely. Reproduce them identically — the curve, the angle, any step or undercut, any decorative sweep. Do NOT invent, smooth, or generalize.',
-        '- NEGATIVE CONSTRAINT: Do NOT default to a generic cathedral shoulder, donut gallery, peg-head, tulip basket, cone basket, or smooth solitaire taper unless the reference explicitly shows that exact structure.',
-        '- The band and lower basket fill the frame. The stone appears at the TOP partially visible but is NOT the focus.',
-        '- CRITICAL: Do NOT show the INTERIOR or UNDERSIDE of the basket — only the EXTERIOR SIDE WALL is visible from this angle.',
-        '- STRICT: Do NOT invent decorative elements not present in the reference image.',
-        '- Clean white surface with soft micro-shadow beneath the piece.',
-        '- No reflections, no gradients.',
-        '- Square 1:1 frame. White fill any empty areas.',
-    ] : [
-        'SCENE \u2014 TOP-DOWN 45\u00b0:',
-        '- The ring lies FLAT on a clean white surface with the FRONT of the ring facing the camera \u2014 the stone/setting is the focal point, fully visible from above.',
-        '- Camera is positioned above and slightly in front, at roughly 45 degrees from overhead, angled to look down at the FRONT FACE of the ring.',
-        '- The stone face, prongs, and setting must be clearly visible and dominate the frame \u2014 this is a top-down view of the FRONT of the ring, not the back.',
-        '- DO NOT show the back or underside of the ring. The camera must see the same front face as the standard front view, just from a higher angle.',
-        '- The band should be visible curving away from the camera, providing context but not dominating.',
-        '- Clean, minimal e-commerce shot \u2014 soft, natural drop shadow directly beneath the piece.',
-        '- No reflections, no gradients, no artificial glow.',
-        '- Square 1:1 frame. White fill any empty areas.',
-    ];
-
-    const lightingBlock = isDetail ? [
-        'LIGHTING \u2014 MACRO:',
-        '- Single narrow spotlight or ring flash aimed directly at the featured area',
-        '- Every facet, prong, and micro-texture must be crisply lit',
-        '- Diamonds: intense prismatic fire and sharp sparkle points. Gold: warm micro-reflections. Silver: cool crisp glint.',
-        '- No fill lights \u2014 hard light that reveals micro-detail',
-    ] : [
-        'LIGHTING:',
-        '- Single overhead softbox \u2014 bright but natural, not clinical',
-        '- Clean specular highlights on metal and gemstones showing their exact material properties',
-        '- Diamonds: sharp prismatic sparkle. Gold: warm reflection. Silver: cool crisp gleam.',
-        '- No fill lights, no rim lights \u2014 one source only',
-    ];
-
-    // ── Nano Banana v3 band shot ─────────────────────────────────────────────
-    let bandParts = null;
-    if (isBand) {
-        const originals  = promptInputs.filter(img => img.mimeType === 'image/jpeg');
-        const frontRef   = hasFrontRef ? [promptInputs[promptInputs.length - 1]] : [];
-        const crops      = await generateShoulderCrops(originals);
-        const geometryNote = await generateGeometryNote(originals, crops);
-        // Image order: originals → crops → front ref (last)
-        const orderedImages = [...originals, ...crops, ...frontRef];
-
-        const bandPrompt = [
-            'Use the uploaded image(s) as the EXACT reference of the jewelry piece.',
-            contextNote,
-            '',
-            `You have ${originals.length} original reference photo(s) and${hasFrontRef ? ' one approved rendered front view (the last image). The originals are your primary authority for every physical detail. The rendered front view is a secondary check for stone layout, metal color, and finish.' : ' no rendered front view. The originals are your primary authority for every physical detail.'}`,
-            '',
-            'TASK: Extract this jewelry piece from its background and generate a professional luxury product photograph for a high-end e-commerce listing.',
-            '',
-            ...(geometryNote ? [
-                'GEOMETRY ANCHOR — read this first, then cross-check against reference images:',
-                geometryNote,
-                '',
-            ] : []),
-            'SUBJECT FIDELITY:',
-            'Reproduce every physical detail from the reference with zero deviation. Count prongs exactly — cross-check against the basket structure to confirm count and arrangement. Reproduce the basket (height, wall thickness, side profile, cut-outs, milgrain, architectural details), the shoulder junction (the exact curve, angle, step, undercut, or sweep where the shank meets the basket base), and the band profile (width, thickness, taper, shank shape, surface details). Preserve exact metal color, texture, gemstone shape, cut, color, and setting type. If any detail is ambiguous, preserve the visible silhouette from the reference — hidden areas stay hidden.',
-            '',
-            'SCENE — SIDE PROFILE VIEW:',
-            'Ring stands upright on its shank. Camera at table-surface level (0–5° elevation), looking horizontally at the left (outer-left) edge of the band. Band and lower basket fill the frame. Stone at top, partially visible, secondary focus. Only the exterior side wall of the basket is visible. Clean white (#FFFFFF) surface, soft micro-shadow beneath. Square 1:1, piece at ~65% of frame, centered, white fill.',
-            '',
-            'LIGHTING:',
-            'Single overhead softbox. Bright, natural. Clean specular highlights — sharp prismatic sparkle on diamonds, warm reflection on gold, cool crisp gleam on silver. Subtle shadow beneath. DSLR macro lens quality: sharp focus across entire piece.',
-            '',
-            'CONSTRAINTS:',
-            'Reproduce only what exists in the reference. Add nothing, remove nothing. The shoulder junction, basket walls, and gallery architecture are locked geometry from the reference, not open to interpretation.',
-            ...(customInstruction ? ['', customInstruction] : []),
-        ].join('\n');
-
-        bandParts = [
-            { text: bandPrompt },
-            ...orderedImages.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
-        ];
-    }
-
-    const prompt = isBand ? null : [
-        'Use the uploaded image(s) as the EXACT reference of the jewelry piece.',
-        contextNote,
-        '',
-        'Extract the jewelry from whatever background or hand is in the reference and generate a professional luxury product photoshoot of the EXACT SAME piece.',
-        'The jewelry must remain 100% identical to the original image(s) — do NOT change the design, shape, gemstones, metal color, texture, proportions, prong count, prong style, setting type, shank profile, or ANY details whatsoever.',
-        'Do NOT add features not in the reference: no extra stones, no split shanks unless the reference has one, no decorative elements, no design "improvements."',
-        'Do NOT remove, simplify, or merge any element from the reference.',
-        '',
-        'ZERO-TOLERANCE GEOMETRY CHECK FOR RINGS:',
-        '- Basket/setting shape and the shoulder junction are LOCKED physical geometry, not stylistic interpretation.',
-        '- Use the ORIGINAL reference photo(s) as the authority for basket height, basket wall angle, gallery architecture, and the exact point where the shank meets the basket.',
-        '- Do NOT replace those areas with a generic ring archetype such as a cathedral shoulder, smooth taper, donut gallery, cone basket, peg-head, or tulip setting.',
-        '- If the chosen camera angle would naturally hide part of the basket or shoulder, keep that area hidden or only as visible as the real reference supports. Do NOT reveal invented side geometry.',
-        '- If any basket or shoulder detail is ambiguous, stay conservative and preserve the visible silhouette from the reference instead of guessing.',
-        '',
-        'PRONG COUNT: Count the EXACT number of prongs in the reference image. Then cross-check by studying the basket and gallery structure — the prongs connect to the basket, so the basket shape confirms the prong count and arrangement. Reproduce that EXACT number. Do NOT default to 4 prongs — if the reference has 6, 8, 12, or any other count, match it precisely. The prong count is a fixed physical property of the ring.',
-        'BASKET/SETTING: Reproduce the basket exactly — its height, wall thickness, side profile shape, any decorative cut-outs, milgrain, or architectural details. The basket is as much a design element as the stone. Do NOT simplify it into a plain cone or cylinder.',
-        'SHOULDER (where band meets basket): HIGHEST PRIORITY. The shoulder is the exact point where the shank widens or transitions into the base of the setting. Look at the reference and find this junction on BOTH sides of the ring. It may have a specific curve, step, undercut, cut-out, swept wing, or decorative shape. You MUST reproduce it exactly — do NOT smooth it, simplify it, or replace it with a generic taper. If you cannot see both shoulders clearly in a single reference image, look at ALL reference images provided and piece together the full picture. Inventing or guessing the shoulder shape is not acceptable.',
-        '',
-        ...sceneBlock,
-        '',
-        'Place the jewelry alone on a clean, minimal pure white (#FFFFFF) background.',
-        '',
-        ...lightingBlock,
-        '- Subtle, realistic shadows and reflections for a high-end jewelry product shoot look.',
-        '- The image should appear as if photographed using a professional DSLR with a macro lens: extremely sharp focus across the entire piece, high resolution, luxury commercial photography quality.',
-        '',
-        'WHITESPACE: The piece should occupy roughly 65% of the frame, centered, with equal breathing room on all sides.',
-        '',
-        'Do NOT modify the jewelry in ANY way. Only improve the presentation, lighting, and background.',
-        'The reference image is the ONLY source of truth. If a detail is not visible in the reference, do NOT invent it.',
-        '',
-        'Square 1:1 output.',
-        ...(customInstruction ? ['', `CUSTOM SCENE OVERRIDE: ${customInstruction}`] : []),
-    ].join('\n');
-
-    const parts = bandParts ?? [
         { text: prompt },
-        ...promptInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+        ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
-
     const raw = await callGemini(parts);
     return makeSquareBase64(raw);
 }
 
-// ── Model shot ──────────────────────────────────────────────────────────────
-async function generateModelShot(imageInputs, customInstruction) {
-    const sceneInstruction = customInstruction
-        ? `Place the jewelry in this scene: ${customInstruction}.`
-        : 'Show the jewelry worn on a woman\'s hand \u2014 tight close-up cropped to ONLY the hand and wrist. No face, no body, no neck, no full arm. Just the hand. Natural, elegant hand with relaxed fingers in a graceful pose. Single soft key light from camera-left. Shallow depth of field with the jewelry in razor-sharp focus and the background gently blurred. Square 1:1 crop.';
+async function generateWithOpenAI(prompt, imageInputs) {
+    await acquireGeminiSlot(); // reuse the same concurrency limiter
+    try {
+        // Use gpt-image-1.5 via the Images API with reference images
+        const imageFiles = imageInputs.map((img, i) => {
+            const buf = Buffer.from(img.base64, 'base64');
+            return new File([buf], `ref_${i}.png`, { type: img.mimeType });
+        });
 
-    const prompt = [
-        'You are simulating a photograph taken by a professional jewelry photographer. You have been given one reference photo of the jewelry piece.',
-        '',
-        'CRITICAL \u2014 reproduce the jewelry with absolute fidelity:',
-        '- Every gemstone: exact color, cut style, facet count, number of stones, their arrangement and size ratios',
-        '- Metal: exact color and finish (yellow gold, rose gold, silver, oxidised, brushed, polished, matte)',
-        '- Every design detail: prong count, setting style, engraving, filigree, milgrain, links, clasps, chain pattern',
-        '- Proportions and scale must match the reference exactly \u2014 do not resize, idealise, or simplify any element',
-        '- Do NOT add stones that are not in the reference. Do NOT remove or merge design elements. Do NOT change the metal color.',
-        '- IF THE JEWELRY IS A RING: preserve the exact basket/setting profile and the exact shoulder junction where the shank meets the basket. Do NOT replace them with a generic cathedral shoulder, smooth taper, cone basket, donut gallery, peg-head, or tulip setting.',
-        '- IF THE JEWELRY IS A RING: if the hand pose or camera angle partly hides the basket or shoulder, keep those areas hidden rather than inventing geometry that is not supported by the reference.',
-        '',
-        'PHOTOGRAPHIC REALISM \u2014 this must be indistinguishable from an editorial photo in Vogue or Harper\'s Bazaar:',
-        '',
-        'ANTI-AI CHECKLIST (every point is mandatory):',
-        '- FRAMING: Show ONLY the hand and wrist. No face, no neck, no shoulders, no full arm. Crop tightly.',
-        '- Hands: visible knuckle creases, slightly uneven nail lengths, natural skin tone variation across fingers. Subtle vein texture on the back of the hand. Realistic nail beds with natural cuticles.',
-        '- Skin: real skin on a woman in her early 20s \u2014 fine pore texture on the fingers and back of hand, smooth healthy look, natural tonal variation between knuckles and palm side. NO porcelain-smooth AI skin. ABSOLUTELY NO signs of aging \u2014 no wrinkles, no visible bulging veins, no sun damage, no aged hands.',
-        '- Fingers: natural finger proportions, realistic joint bends, fingertips with visible fingerprint texture. Nails should have a natural manicure (not glossy gel, not bare bitten nails).',
-        '',
-        'LIGHTING:',
-        '- One dominant key light source with clear directionality (window light from camera-left, or a single softbox above-right)',
-        '- The shadow side of the hand should be noticeably darker, not filled in evenly',
-        '- Jewelry should have ONE bright specular highlight and natural shadow falloff \u2014 not glowing from all directions',
-        '- Avoid flat, shadowless, "product listing" lighting',
-        '',
-        'COMPOSITION:',
-        '- Shot on an 85mm f/1.4 lens',
-        '- Frame it like a real photographer would: rule of thirds, slight negative space, the jewelry at a natural visual anchor point',
-        '- Slight depth compression typical of a telephoto portrait lens \u2014 background elements slightly enlarged relative to subject',
-        '',
-        'BACKGROUND \u2014 STUDIO:',
-        '- Professional photography studio with a seamless paper or muslin backdrop in a warm neutral tone (soft grey, warm taupe, or muted beige).',
-        '- The backdrop must show subtle real-world imperfections: very faint creases or wrinkles in the paper/fabric, slight tonal unevenness where the light falls off toward the edges.',
-        '- Light falloff: center slightly brighter from the key light, gentle natural darkening toward the corners. NOT a perfectly uniform flat tone.',
-        '',
-        'COLOR:',
-        '- Warm, slightly desaturated tones as if shot on Kodak Portra 400 film \u2014 soft contrast, creamy highlights, natural shadow rolloff',
-        '- Skin tones should lean warm and natural, never orange or pink-shifted',
-        '- Avoid over-saturation \u2014 real editorial photos are usually more muted than you\'d expect',
-        '',
-        'CAMERA ARTIFACTS (these make it look REAL \u2014 do not skip):',
-        '- Fine film grain or sensor noise visible across the entire image, especially in shadow areas and the backdrop. This is the single most important anti-AI signal.',
-        '- Very subtle chromatic aberration (color fringing) at high-contrast edges like metal against backdrop.',
-        '- Natural vignetting: corners of the frame slightly darker than center.',
-        '- Micro-motion: the tiniest sense of life \u2014 not everything frozen perfectly sharp, as if shot at 1/200s.',
-        '- Focus falloff should feel optical (gradual, with bokeh circles on specular highlights) not computational (uniform gaussian blur).',
-        '',
-        'WHAT TO AVOID (common AI tells):',
-        '- Perfectly noise-free, grain-free image \u2014 this screams AI. Real cameras always have sensor noise.',
-        '- Perfectly smooth skin on the hand \u2014 real hands have texture',
-        '- Symmetrical studio lighting with no shadow',
-        '- Hyper-sharp everything \u2014 real photos have a focal plane; things before and after it go soft',
-        '- Showing any part of the body beyond the hand and wrist',
-        '- Jewelry that glows or emits light rather than reflecting it',
-        '',
-        'JEWELRY LIGHT BEHAVIOR:',
-        '- The jewelry must reflect light naturally from the single key source only \u2014 no omnidirectional glow, no self-illumination, no HDR bloom on the metal',
-        '- Diamonds: sharp prismatic fire from the key light. Gold: warm single-source reflection. Silver: cool crisp glint.',
-        '',
-        sceneInstruction,
-        '',
-        'The jewelry must be the absolute focal point. Every surface facet and metal texture must be visible and physically correct.',
-    ].join('\n');
+        console.log(`[OpenAI] calling gpt-image-1.5... (${imageFiles.length} reference image(s))`);
 
-    const refNote = imageInputs.length > 1
-        ? `You have ${imageInputs.length} reference photos of the jewelry piece from different angles. Study ALL of them to build a complete understanding of the piece before generating.`
-        : 'You have been given one reference photo of the jewelry piece.';
+        const response = await openaiClient.images.edit({
+            model: 'gpt-image-1.5',
+            image: imageFiles,
+            prompt: prompt,
+            n: 1,
+            size: '1024x1024',
+            quality: 'high',
+        });
 
+        const b64 = response.data?.[0]?.b64_json;
+        if (!b64) {
+            throw new Error('OpenAI returned no image data');
+        }
+
+        // Validate
+        const buf = Buffer.from(b64, 'base64');
+        const meta = await sharp(buf).metadata();
+        if (!meta.width || !meta.height) throw new Error('OpenAI returned invalid image');
+
+        console.log('[OpenAI] image OK');
+        return makeSquareBase64(b64);
+    } finally {
+        releaseGeminiSlot();
+    }
+}
+
+async function generateWithNanoBana2(prompt, imageInputs) {
     const parts = [
-        { text: refNote + '\n\n' + prompt },
+        { text: prompt },
         ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
-    const raw = await callGemini(parts);
+    const raw = await callNanoBana2(parts);
     return makeSquareBase64(raw);
 }
 
@@ -734,7 +686,6 @@ async function generateModelShot(imageInputs, customInstruction) {
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [2000, 5000, 10000];
 
-// Concurrency limiter — max 3 parallel Gemini calls
 const MAX_CONCURRENT = 3;
 let activeGeminiCalls = 0;
 const geminiQueue = [];
@@ -762,8 +713,8 @@ async function callGemini(parts, attempt = 0) {
     await acquireGeminiSlot();
     try {
         console.log(`[Gemini] calling... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-image-preview',
+        const response = await geminiClient.models.generateContent({
+            model: 'gemini-3-pro-image-preview',
             contents: [{ parts }],
             config: { responseModalities: ['TEXT', 'IMAGE'] },
         });
@@ -773,10 +724,9 @@ async function callGemini(parts, attempt = 0) {
         if (!imagePart) {
             const text = resParts.find(p => p.text)?.text || 'none';
             console.error('[Gemini] No image. Response text:', text.slice(0, 300));
-            throw new Error('Gemini returned no image \u2014 ' + text.slice(0, 120));
+            throw new Error('Gemini returned no image — ' + text.slice(0, 120));
         }
 
-        // Validate the returned image
         try {
             const buf = Buffer.from(imagePart.inlineData.data, 'base64');
             const meta = await sharp(buf).metadata();
@@ -793,6 +743,53 @@ async function callGemini(parts, attempt = 0) {
             console.log(`[Gemini] retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
             await new Promise(r => setTimeout(r, delay));
             return callGemini(parts, attempt + 1);
+        }
+        throw err;
+    } finally {
+        releaseGeminiSlot();
+    }
+}
+
+async function callNanoBana2(parts, attempt = 0) {
+    await acquireGeminiSlot();
+    try {
+        console.log(`[NanoBana2] calling gemini-3.1-flash-image-preview... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
+        const response = await geminiClient.models.generateContent({
+            model: 'gemini-3.1-flash-image-preview',
+            contents: [{ parts }],
+            config: {
+                responseModalities: ['TEXT', 'IMAGE'],
+                imageConfig: {
+                    aspectRatio: '1:1',
+                    imageSize: '2K',
+                },
+            },
+        });
+
+        const resParts  = response.candidates?.[0]?.content?.parts || [];
+        const imagePart = resParts.find(p => p.inlineData?.data && !p.thought);
+        if (!imagePart) {
+            const text = resParts.find(p => p.text)?.text || 'none';
+            console.error('[NanoBana2] No image. Response text:', text.slice(0, 300));
+            throw new Error('Nano Banana 2 returned no image — ' + text.slice(0, 120));
+        }
+
+        try {
+            const buf = Buffer.from(imagePart.inlineData.data, 'base64');
+            const meta = await sharp(buf).metadata();
+            if (!meta.width || !meta.height) throw new Error('Invalid image dimensions');
+        } catch (valErr) {
+            throw new Error('Nano Banana 2 returned invalid image data');
+        }
+
+        console.log('[NanoBana2] image OK');
+        return imagePart.inlineData.data;
+    } catch (err) {
+        if (attempt < MAX_RETRIES - 1) {
+            const delay = RETRY_DELAYS[attempt] || 5000;
+            console.log(`[NanoBana2] retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+            await new Promise(r => setTimeout(r, delay));
+            return callNanoBana2(parts, attempt + 1);
         }
         throw err;
     } finally {
@@ -836,4 +833,4 @@ async function toJpeg(filePathOrName, buffer) {
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`\n\ud83d\ude80  Image Pipeline \u2192 http://localhost:${PORT}\n`));
+app.listen(PORT, () => console.log(`\nHouse of Mina Pipeline → http://localhost:${PORT}\n`));
