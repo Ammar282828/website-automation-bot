@@ -618,6 +618,24 @@
     .btn-cancel-batch:hover { background: #fee2e2; }
     .btn-cancel-batch.visible { display: block; }
 
+    .btn-resume-batch {
+      width: 100%;
+      padding: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: var(--radius);
+      border: 1px solid #bbf7d0;
+      background: #f0fdf4;
+      color: #166534;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-family: inherit;
+      display: none;
+      margin-top: 8px;
+    }
+    .btn-resume-batch:hover { background: #dcfce7; }
+    .btn-resume-batch.visible { display: block; }
+
     /* ── Quick presets ── */
     .presets-row {
       display: flex;
@@ -1003,6 +1021,7 @@
     </div>
     <button class="btn-generate" id="btn-generate" disabled>Generate Shots</button>
     <button class="btn-cancel-batch" id="btn-cancel-batch">Cancel Batch</button>
+    <button class="btn-resume-batch" id="btn-resume-batch">Resume Batch</button>
   </div>
 
   <!-- ═══ PROGRESS ═══ -->
@@ -1586,10 +1605,14 @@
   // ── Batch ─────────────────────────────────────────────────────────────────
   const folderPathInput  = document.getElementById('folder-path');
   const btnCancelBatch   = document.getElementById('btn-cancel-batch');
+  const btnResumeBatch   = document.getElementById('btn-resume-batch');
   const batchLog         = document.getElementById('batch-log');
   const logEntries       = document.getElementById('log-entries');
   const batchResultsEl   = document.getElementById('batch-results');
   const batchFolderMap   = {};
+
+  // Track last batch params for resume
+  let lastBatchParams = null;
 
   btnCancelBatch.addEventListener('click', async () => {
     btnCancelBatch.textContent = 'Cancelling...';
@@ -1598,27 +1621,41 @@
     addLog('Cancel requested — stopping after current product...', 'err');
   });
 
-  function startBatch() {
+  btnResumeBatch.addEventListener('click', () => {
+    if (!lastBatchParams) return;
+    startBatch(true);
+  });
+
+  function startBatch(isResume = false) {
     const folderPath        = folderPathInput.value.trim().replace(/^['"]|['"]$/g, '');
     const customInstruction = customInput.value.trim();
     if (!folderPath || selectedShots.size === 0) return;
 
-    logEntries.innerHTML = '';
-    batchResultsEl.innerHTML = '';
-    batchResultsEl.classList.remove('visible');
-    Object.keys(batchFolderMap).forEach(k => delete batchFolderMap[k]);
+    // Save batch params for resume
+    lastBatchParams = { folderPath, customInstruction, shots: [...selectedShots], provider: selectedProvider };
+
+    if (!isResume) {
+      logEntries.innerHTML = '';
+      batchResultsEl.innerHTML = '';
+      batchResultsEl.classList.remove('visible');
+      Object.keys(batchFolderMap).forEach(k => delete batchFolderMap[k]);
+    } else {
+      addLog('\n── Resuming batch... ──', 'info');
+    }
 
     batchLog.classList.add('visible');
     btnGenerate.disabled = true;
-    btnGenerate.textContent = 'Processing...';
+    btnGenerate.textContent = isResume ? 'Resuming...' : 'Processing...';
     btnCancelBatch.classList.add('visible');
     btnCancelBatch.disabled = false;
     btnCancelBatch.textContent = 'Cancel Batch';
+    btnResumeBatch.classList.remove('visible');
 
     let batchFinished = false;
     const shotsParam = encodeURIComponent(JSON.stringify([...selectedShots]));
     let url = `/batch?folderPath=${encodeURIComponent(folderPath)}&shots=${shotsParam}&provider=${encodeURIComponent(selectedProvider)}`;
     if (customInstruction) url += `&customInstruction=${encodeURIComponent(customInstruction)}`;
+    if (isResume) url += '&resume=1';
     const src = new EventSource(url);
 
     src.onmessage = (e) => {
@@ -1633,6 +1670,10 @@
 
       } else if (msg.type === 'product_error') {
         addLog(`  \u2717 ${msg.message}`, 'err');
+
+      } else if (msg.type === 'angle_skipped') {
+        addLog(`  \u21BB ${msg.label} (already done)`, 'ok');
+        renderBatchAngleCard(msg.product, msg.angle, msg.label, msg.savedTo);
 
       } else if (msg.type === 'angle_start') {
         addLog(`  ${msg.label}...`);
@@ -1650,28 +1691,45 @@
         updateCostBar(msg.usage);
 
       } else if (msg.type === 'product_done') {
-        addLog(`  Done`, 'ok');
+        addLog(msg.skipped ? `  Skipped (complete)` : `  Done`, 'ok');
 
       } else if (msg.type === 'cancelled') {
         addLog(`\n${msg.message}`, 'err');
         batchFinished = true;
-        finishBatch(src);
+        finishBatch(src, false);
 
       } else if (msg.type === 'error') {
         addLog(`Error: ${msg.message}`, 'err');
         batchFinished = true;
-        finishBatch(src);
+        finishBatch(src, false);
 
       } else if (msg.type === 'done') {
         addLog('\nBatch complete!', 'ok');
         batchFinished = true;
-        finishBatch(src);
+        finishBatch(src, true);
       }
     };
 
+    let reconnectAttempts = 0;
+    const MAX_RECONNECTS = 3;
+
     src.onerror = () => {
-      if (!batchFinished) addLog('Connection lost — is the server running?', 'err');
-      finishBatch(src);
+      if (batchFinished) return;
+      reconnectAttempts++;
+      if (reconnectAttempts <= MAX_RECONNECTS) {
+        addLog(`Connection interrupted — reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECTS})...`, 'err');
+        // EventSource auto-reconnects; we just track attempts
+      } else {
+        addLog('Connection lost after multiple attempts — click Resume to continue.', 'err');
+        finishBatch(src, false);
+      }
+    };
+
+    // Reset reconnect counter on successful messages
+    const origOnMessage = src.onmessage;
+    src.onmessage = (e) => {
+      reconnectAttempts = 0;
+      origOnMessage(e);
     };
   }
 
@@ -1800,11 +1858,18 @@
     logEntries.parentElement.scrollTop = 9999;
   }
 
-  function finishBatch(src) {
+  function finishBatch(src, completed = false) {
     src.close();
     btnGenerate.disabled = false;
     updateGenerateButton();
     btnCancelBatch.classList.remove('visible');
+
+    // Show Resume button if batch didn't complete successfully
+    if (!completed && lastBatchParams && currentMode === 'batch') {
+      btnResumeBatch.classList.add('visible');
+    } else {
+      btnResumeBatch.classList.remove('visible');
+    }
   }
 
   // ── Cost tracker ───────────────────────────────────────────────────────────
