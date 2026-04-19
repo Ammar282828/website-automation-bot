@@ -449,14 +449,44 @@ app.get('/batch', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');   // disable proxy buffering (nginx etc.)
     res.flushHeaders();
 
-    const send = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    // Disable socket timeout for long-running SSE streams
+    req.socket.setTimeout(0);
+    req.socket.setNoDelay(true);
+    req.socket.setKeepAlive(true, 30000);
+
+    // Track client disconnection
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+
+    const send = (payload) => {
+        if (clientDisconnected) return;
+        try {
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        } catch (e) {
+            clientDisconnected = true;
+            console.error('[SSE] Write failed, client likely disconnected');
+        }
+    };
+
+    // SSE heartbeat — send a comment every 15 seconds to keep connection alive
+    const heartbeat = setInterval(() => {
+        if (clientDisconnected) { clearInterval(heartbeat); return; }
+        try {
+            res.write(': heartbeat\n\n');
+        } catch (e) {
+            clientDisconnected = true;
+            clearInterval(heartbeat);
+        }
+    }, 15000);
 
     const folderPath        = (req.query.folderPath || '').trim().replace(/^['"]|['"]$/g, '');
     const customInstruction = (req.query.customInstruction || '').trim() || null;
     const shotIds           = JSON.parse(req.query.shots || '[]');
     const provider          = (req.query.provider || 'gemini').trim();
+    const resume            = req.query.resume === '1';
 
     if (!folderPath) { send({ type: 'error', message: 'No folder path provided.' }); return res.end(); }
     if (!fs.existsSync(folderPath)) { send({ type: 'error', message: `Folder not found: ${folderPath}` }); return res.end(); }
@@ -475,10 +505,14 @@ app.get('/batch', async (req, res) => {
     activeBatchId = Date.now().toString();
     batchCancelled = false;
 
-    send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds });
+    send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds, resume });
     console.log(`[Batch] Starting — ${productDirs.length} product(s), shots: ${shotIds.join(', ')}`);
 
     for (const { name: productName, fullPath: productFolder } of productDirs) {
+        if (clientDisconnected) {
+            console.log('[SSE] Client disconnected, stopping batch.');
+            break;
+        }
         if (batchCancelled) {
             send({ type: 'cancelled', message: 'Batch cancelled by user.' });
             break;
@@ -499,12 +533,28 @@ app.get('/batch', async (req, res) => {
             }
 
             const imageInputs = await Promise.all(imageFiles.map(async (fp) => {
-                const buf = await toJpeg(fp, fs.readFileSync(fp));
+                const raw = await fs.promises.readFile(fp);
+                const buf = await toJpeg(fp, raw);
                 return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
             }));
 
             const outDir = path.join(folderPath, 'output', productName);
             fs.mkdirSync(outDir, { recursive: true });
+
+            // ── Resume: check if ALL shots for this product already exist ──
+            if (resume) {
+                const allDone = shotIds.every(id => fs.existsSync(path.join(outDir, `${id}.png`)));
+                if (allDone) {
+                    for (const shotId of shotIds) {
+                        const shot = SHOT_CATALOG[shotId];
+                        if (!shot) continue;
+                        const outPath = path.join(outDir, `${shotId}.png`);
+                        send({ type: 'angle_skipped', product: productName, angle: shotId, label: shot.label, savedTo: outPath });
+                    }
+                    send({ type: 'product_done', product: productName, skipped: true });
+                    continue;
+                }
+            }
 
             // ── Anchor-first consistency pipeline ──
             const anchorId = shotIds.includes('ecom_hero') ? 'ecom_hero'
@@ -513,20 +563,28 @@ app.get('/batch', async (req, res) => {
 
             let anchorRef = null;
             const anchorShot = SHOT_CATALOG[anchorId];
+            const anchorOutPath = path.join(outDir, `${anchorId}.png`);
 
-            send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
-            console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
-            try {
-                const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
-                anchorRef = { base64: b64, mimeType: 'image/png' };
-                const outPath = path.join(outDir, `${anchorId}.png`);
-                fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
-                send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: outPath });
-                send({ type: 'usage', usage: usageStats });
-                console.log(`  [Shot] ✓ ${anchorShot.label} → ${outPath}`);
-            } catch (err) {
-                send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
-                console.error(`  [Shot] ✗ ${anchorShot.label}: ${err.message}`);
+            // Resume: try to reuse existing anchor
+            if (resume && fs.existsSync(anchorOutPath)) {
+                console.log(`[Resume] Reusing existing anchor for ${productName}/${anchorId}`);
+                const existingBuf = await fs.promises.readFile(anchorOutPath);
+                anchorRef = { base64: existingBuf.toString('base64'), mimeType: 'image/png' };
+                send({ type: 'angle_skipped', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)`, savedTo: anchorOutPath });
+            } else {
+                send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
+                console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
+                try {
+                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
+                    anchorRef = { base64: b64, mimeType: 'image/png' };
+                    fs.writeFileSync(anchorOutPath, Buffer.from(b64, 'base64'));
+                    send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: anchorOutPath });
+                    send({ type: 'usage', usage: usageStats });
+                    console.log(`  [Shot] ✓ ${anchorShot.label} → ${anchorOutPath}`);
+                } catch (err) {
+                    send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
+                    console.error(`  [Shot] ✗ ${anchorShot.label}: ${err.message}`);
+                }
             }
 
             if (batchCancelled) {
@@ -540,14 +598,22 @@ app.get('/batch', async (req, res) => {
             const refsWithAnchor = anchorRef ? [...imageInputs, anchorRef] : imageInputs;
             const hasAnchor = !!anchorRef;
 
+            // Figure out which remaining shots need generating vs skipping
+            const toGenerate = [];
             for (const shotId of remaining) {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) continue;
-                send({ type: 'angle_start', product: productName, angle: shotId, label: shot.label });
-                console.log(`  [Shot] Generating: ${shot.label} (${shotId}) via ${provider}...`);
+                const shotOutPath = path.join(outDir, `${shotId}.png`);
+                if (resume && fs.existsSync(shotOutPath)) {
+                    send({ type: 'angle_skipped', product: productName, angle: shotId, label: shot.label, savedTo: shotOutPath });
+                } else {
+                    send({ type: 'angle_start', product: productName, angle: shotId, label: shot.label });
+                    console.log(`  [Shot] Generating: ${shot.label} (${shotId}) via ${provider}...`);
+                    toGenerate.push(shotId);
+                }
             }
 
-            const parallelTasks = remaining.map(shotId => {
+            const parallelTasks = toGenerate.map(shotId => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return Promise.resolve();
                 return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider)
@@ -579,15 +645,17 @@ app.get('/batch', async (req, res) => {
         }
     }
 
+    clearInterval(heartbeat);
+
     const wasCancelled = batchCancelled;
     activeBatchId = null;
     batchCancelled = false;
 
-    if (!wasCancelled) {
+    if (!wasCancelled && !clientDisconnected) {
         send({ type: 'done' });
         console.log(`\n[Batch] Complete — $${usageStats.session.total.cost.toFixed(3)} spent, ${usageStats.session.total.images} images`);
     }
-    res.end();
+    if (!clientDisconnected) res.end();
 });
 
 // ── Batch retry single shot ─────────────────────────────────────────────────
@@ -608,7 +676,8 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
 
     try {
         const imageInputs = await Promise.all(imageFiles.map(async (fp) => {
-            const buf = await toJpeg(fp, fs.readFileSync(fp));
+            const rawFile = await fs.promises.readFile(fp);
+            const buf = await toJpeg(fp, rawFile);
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
@@ -620,6 +689,104 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
         res.status(500).json({ error: err.message || 'Retry failed.' });
+    }
+});
+
+// ── WhatsApp caption generation ────────────────────────────────────────────
+app.post('/generate-caption', upload.array('images[]', 10), async (req, res) => {
+    const productName   = (req.body.productName || '').trim() || 'this piece';
+    const extraContext   = (req.body.extraContext || '').trim();
+
+    // Build image inputs from uploaded files (if any)
+    let imageInputs = [];
+    if (req.files && req.files.length > 0) {
+        imageInputs = await Promise.all(req.files.map(async (f) => {
+            const buf = await toJpeg(f.originalname || '', f.buffer);
+            return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
+        }));
+    }
+
+    // Also accept base64 images from JSON body (for generated images)
+    const jsonImages = req.body.captionImages ? JSON.parse(req.body.captionImages) : [];
+    for (const img of jsonImages) {
+        if (img.b64) imageInputs.push({ base64: img.b64, mimeType: 'image/png' });
+    }
+
+    const captionPrompt = `You are the copywriter for House of Mina (houseofmina.store), a luxury South Asian jewelry brand based in Karachi. You write WhatsApp community posts to showcase new jewelry pieces.
+
+BRAND VOICE & STYLE:
+- Sophisticated yet accessible, warm, elegant, aspirational
+- Short punchy sentences. Conversational but elevated
+- Open with a hook that creates desire (e.g. "Meet your new obsession.", "Some pieces just speak for themselves.", "This one's going to turn heads.")
+- Highlight the key visual feature of THIS specific piece (describe what you actually see in the image — the stone color, the design style, the sparkle)
+- Use WhatsApp bold formatting with asterisks for key specs: *925 Sterling Silver*, *Gold Plated*, etc.
+- End with a soft-launch / urgency line, then the standard CTA
+
+DEFAULT MATERIAL SPECS (use these unless the image clearly shows otherwise or extra context overrides):
+- 925 Sterling Silver with White Rhodium / Gold Plating
+- Cubic Zirconia stones
+- Simulated coloured stones (e.g. *simulated emeralds*, *simulated rubies*) — NOT certified/natural unless specified
+
+WHATSAPP FORMATTING RULES:
+- Use *asterisks* for bold (key specs, brand name)
+- Use _underscores_ for italic (rare, only for emphasis)
+- Line breaks between sections (hook / description / CTA)
+- Emojis only at the CTA section at the end
+- Keep the whole caption under 500 characters
+
+SAMPLE FOR REFERENCE (match this energy and structure):
+"Meet your new obsession. *A certified yellow sapphire. Brilliant zircon accents. 925 sterling silver*. A combination this stunning doesn't come along often — and at *House of Mina*, it's entirely yours. We're celebrating our soft launch with special introductory pricing. These pieces won't wait forever. 📩 DM to order 🇵🇰 Nationwide Delivery"
+
+CTA BLOCK (always end with this exact block):
+📩 DM to order
+🇵🇰 Nationwide Delivery
+
+${extraContext ? `EXTRA CONTEXT FROM THE USER: ${extraContext}\n` : ''}
+Now look at the jewelry image(s) provided and write ONE WhatsApp community caption for ${productName}. Output ONLY the caption text, nothing else — no quotes, no explanation, no markdown code blocks.`;
+
+    try {
+        let captionText;
+
+        if (geminiClient && imageInputs.length > 0) {
+            const parts = [
+                { text: captionPrompt },
+                ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+            ];
+            await acquireGeminiSlot();
+            try {
+                const response = await geminiClient.models.generateContent({
+                    model: 'gemini-3.1-pro-preview',
+                    contents: [{ parts }],
+                });
+                const resParts = response.candidates?.[0]?.content?.parts || [];
+                captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
+            } finally {
+                releaseGeminiSlot();
+            }
+        } else if (geminiClient) {
+            // Text-only (no images)
+            await acquireGeminiSlot();
+            try {
+                const response = await geminiClient.models.generateContent({
+                    model: 'gemini-3.1-pro-preview',
+                    contents: [{ parts: [{ text: captionPrompt }] }],
+                });
+                const resParts = response.candidates?.[0]?.content?.parts || [];
+                captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
+            } finally {
+                releaseGeminiSlot();
+            }
+        } else {
+            return res.status(500).json({ error: 'No AI provider available for caption generation.' });
+        }
+
+        // Clean up: remove wrapping quotes or code blocks if the model added them
+        captionText = captionText.replace(/^["'`]+|["'`]+$/g, '').replace(/^```[\s\S]*?\n/, '').replace(/\n```$/, '').trim();
+
+        res.json({ success: true, caption: captionText });
+    } catch (err) {
+        console.error('[Caption Error]', err?.message || err);
+        res.status(500).json({ error: err.message || 'Caption generation failed.' });
     }
 });
 
@@ -716,14 +883,18 @@ async function generateWithOpenAI(prompt, imageInputs) {
 
         console.log(`[OpenAI] calling gpt-image-1.5... (${imageFiles.length} reference image(s))`);
 
-        const response = await openaiClient.images.edit({
-            model: 'gpt-image-1.5',
-            image: imageFiles,
-            prompt: prompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'high',
-        });
+        const response = await withTimeout(
+            openaiClient.images.edit({
+                model: 'gpt-image-1.5',
+                image: imageFiles,
+                prompt: prompt,
+                n: 1,
+                size: '1024x1024',
+                quality: 'high',
+            }),
+            API_TIMEOUT_MS,
+            'OpenAI'
+        );
 
         const b64 = response.data?.[0]?.b64_json;
         if (!b64) {
@@ -749,6 +920,18 @@ async function generateWithNanoBana2(prompt, imageInputs) {
     ];
     const raw = await callNanoBana2(parts);
     return makeSquareBase64(raw);
+}
+
+// ── Timeout helper ────────────────────────────────────────────────────────
+const API_TIMEOUT_MS = 120000; // 2 minutes per API call
+
+function withTimeout(promise, ms, label = 'API call') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+        ),
+    ]);
 }
 
 // ── Shared Gemini call with retry + backoff + concurrency ───────────────────
@@ -782,11 +965,15 @@ async function callGemini(parts, attempt = 0) {
     await acquireGeminiSlot();
     try {
         console.log(`[Gemini] calling... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
-        const response = await geminiClient.models.generateContent({
-            model: 'gemini-3-pro-image-preview',
-            contents: [{ parts }],
-            config: { responseModalities: ['TEXT', 'IMAGE'] },
-        });
+        const response = await withTimeout(
+            geminiClient.models.generateContent({
+                model: 'gemini-3-pro-image-preview',
+                contents: [{ parts }],
+                config: { responseModalities: ['TEXT', 'IMAGE'] },
+            }),
+            API_TIMEOUT_MS,
+            'Gemini'
+        );
 
         const resParts  = response.candidates?.[0]?.content?.parts || [];
         const imagePart = resParts.find(p => p.inlineData?.data && !p.thought);
@@ -823,17 +1010,21 @@ async function callNanoBana2(parts, attempt = 0) {
     await acquireGeminiSlot();
     try {
         console.log(`[NanoBana2] calling gemini-3.1-flash-image-preview... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
-        const response = await geminiClient.models.generateContent({
-            model: 'gemini-3.1-flash-image-preview',
-            contents: [{ parts }],
-            config: {
-                responseModalities: ['TEXT', 'IMAGE'],
-                imageConfig: {
-                    aspectRatio: '1:1',
-                    imageSize: '2K',
+        const response = await withTimeout(
+            geminiClient.models.generateContent({
+                model: 'gemini-3.1-flash-image-preview',
+                contents: [{ parts }],
+                config: {
+                    responseModalities: ['TEXT', 'IMAGE'],
+                    imageConfig: {
+                        aspectRatio: '1:1',
+                        imageSize: '2K',
+                    },
                 },
-            },
-        });
+            }),
+            API_TIMEOUT_MS,
+            'NanoBana2'
+        );
 
         const resParts  = response.candidates?.[0]?.content?.parts || [];
         const imagePart = resParts.find(p => p.inlineData?.data && !p.thought);
@@ -893,9 +1084,13 @@ async function toJpeg(filePathOrName, buffer) {
         const tmpOut = path.join(tmpDir, `heic-out-${stamp}.jpg`);
         try {
             fs.writeFileSync(tmpIn, buffer);
-            await new Promise((resolve, reject) => {
-                execFile('sips', ['-s', 'format', 'jpeg', tmpIn, '--out', tmpOut], err => err ? reject(err) : resolve());
-            });
+            await withTimeout(
+                new Promise((resolve, reject) => {
+                    execFile('sips', ['-s', 'format', 'jpeg', tmpIn, '--out', tmpOut], err => err ? reject(err) : resolve());
+                }),
+                30000,
+                'HEIC conversion'
+            );
             return fs.readFileSync(tmpOut);
         } catch (sipsErr) {
             console.warn(`[HEIC] sips failed (${sipsErr.message}), trying sharp...`);
@@ -914,4 +1109,9 @@ async function toJpeg(filePathOrName, buffer) {
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`\nHouse of Mina Pipeline → http://localhost:${PORT}\n`));
+const server = app.listen(PORT, () => console.log(`\nHouse of Mina Pipeline → http://localhost:${PORT}\n`));
+
+// Keep connections alive and prevent premature drops
+server.keepAliveTimeout = 120000;      // 2 minutes
+server.headersTimeout   = 125000;      // slightly above keepAliveTimeout
+server.requestTimeout   = 0;          // no timeout on requests (SSE streams are long-lived)
