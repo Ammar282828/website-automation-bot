@@ -14,3 +14,7 @@ node_modules/
 # Claude
 .claude/
 .tmp
+
+# Pipeline runtime
+.cache/
+audit.log

@@ -582,6 +582,79 @@
 
     .folder-row { display: flex; gap: 8px; width: 100%; }
     .folder-row .field-input { flex: 1; font-family: 'Courier New', monospace; font-size: 0.82rem; }
+    .btn-browse {
+      padding: 0 16px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-browse:hover { background: var(--border); }
+    .btn-browse:disabled { opacity: 0.5; cursor: wait; }
+
+    /* Lock state on batch result cards */
+    .result-card.locked { outline: 2px solid var(--gold); outline-offset: -2px; }
+    .btn-lock { min-width: 80px; }
+
+    /* Prompt inspector modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+      padding: 20px;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-md); padding: 20px 24px;
+      max-width: 720px; width: 100%; max-height: 85vh;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .modal-title { font-size: 0.9rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; }
+    .modal-close {
+      border: none; background: transparent; font-size: 1.3rem; cursor: pointer; color: var(--muted);
+      line-height: 1; padding: 4px 8px;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body {
+      white-space: pre-wrap;
+      font-family: 'Courier New', monospace; font-size: 0.8rem;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 12px 14px;
+      overflow: auto; flex: 1; color: var(--text2); line-height: 1.5;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+    /* Recent folders dropdown */
+    .recent-folders {
+      position: relative; display: inline-block;
+    }
+    .recent-folders-menu {
+      position: absolute; right: 0; top: calc(100% + 4px);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+      min-width: 260px; max-width: 480px; z-index: 20;
+      display: none; flex-direction: column; overflow: hidden;
+    }
+    .recent-folders-menu.visible { display: flex; }
+    .recent-folders-menu button {
+      border: none; background: transparent; text-align: left;
+      padding: 8px 12px; font-size: 0.78rem; cursor: pointer;
+      font-family: 'Courier New', monospace; color: var(--text2);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid var(--border);
+    }
+    .recent-folders-menu button:hover { background: var(--surface2); color: var(--text); }
+    .recent-folders-menu button:last-child { border-bottom: none; }
+    .recent-folders-menu .recent-empty { padding: 10px 12px; color: var(--muted); font-size: 0.75rem; }
 
     #batch-log { width: 100%; display: none; flex-direction: column; gap: 8px; margin-top: 16px; }
     #batch-log.visible { display: flex; }
@@ -631,7 +704,8 @@
       letter-spacing: 0.1em; color: var(--gold);
       display: flex; align-items: center; gap: 8px;
     }
-    .batch-product-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .batch-product-title::after { content: ''; flex: 1; height: 1px; background: var(--border); order: 1; }
+    .batch-product-title .btn-retry-product { order: 2; margin-left: 4px; padding: 4px 10px; font-size: 0.65rem; letter-spacing: 0.08em; }
     .batch-angles-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
     @media (max-width: 540px) { .batch-angles-grid { grid-template-columns: 1fr; } }
 
@@ -1042,6 +1116,11 @@
         <div class="field-label">Products folder path</div>
         <div class="folder-row">
           <input type="text" id="folder-path" class="field-input" placeholder="/Users/you/Products" />
+          <button type="button" class="btn-browse" id="btn-browse-folder" title="Open a native folder picker">Browse…</button>
+          <div class="recent-folders">
+            <button type="button" class="btn-browse" id="btn-recent-folders" title="Recently used folders">Recent ▾</button>
+            <div class="recent-folders-menu" id="recent-folders-menu"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1080,6 +1159,13 @@
       <div class="field-label">Custom direction <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></div>
       <input type="text" id="custom-instruction" class="field-input" placeholder='e.g. "use rose gold tones" or "dramatic shadows"' />
     </div>
+    <label class="pair-toggle" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);cursor:pointer;">
+      <input type="checkbox" id="auto-match-ring" style="margin-top:3px;accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;" />
+      <span style="display:flex;flex-direction:column;gap:2px;">
+        <span style="font-size:0.78rem;font-weight:600;color:var(--text);">Auto-match ring for bracelets</span>
+        <span style="font-size:0.72rem;color:var(--muted);line-height:1.4;">If a bracelet / bangle / cuff has no matching ring in the source photos, generate a coordinated ring (same metal, stones, aesthetic) and include it in every shot.</span>
+      </span>
+    </label>
     <button class="btn-generate" id="btn-generate" disabled>Generate Shots</button>
     <button class="btn-cancel-batch" id="btn-cancel-batch">Cancel Batch</button>
     <button class="btn-resume-batch" id="btn-resume-batch">Resume Batch</button>
@@ -1177,6 +1263,20 @@
   <button class="cost-bar-reset" id="cost-reset-btn">Reset</button>
 </div>
 
+<!-- Prompt inspector modal -->
+<div class="modal-overlay" id="prompt-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title" id="prompt-modal-title">Prompt</div>
+      <button class="modal-close" id="prompt-modal-close" title="Close (Esc)">×</button>
+    </div>
+    <div class="modal-body" id="prompt-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn-retry" id="prompt-modal-copy">Copy prompt</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── State ─────────────────────────────────────────────────────────────────
   let selectedFiles = [];
@@ -1224,6 +1324,7 @@
   const resultsEl     = document.getElementById('results');
   const resultsGrid   = document.getElementById('results-grid');
   const customInput   = document.getElementById('custom-instruction');
+  const autoMatchRingCheckbox = document.getElementById('auto-match-ring');
   const shotCountEl   = document.getElementById('shot-count');
   const btnDownloadAll = document.getElementById('btn-download-all');
 
@@ -1494,6 +1595,31 @@
 
   document.getElementById('folder-path').addEventListener('input', updateGenerateButton);
 
+  // Native folder picker (macOS server-side)
+  const btnBrowseFolder = document.getElementById('btn-browse-folder');
+  if (btnBrowseFolder) {
+    btnBrowseFolder.addEventListener('click', async () => {
+      const input = document.getElementById('folder-path');
+      btnBrowseFolder.disabled = true;
+      const orig = btnBrowseFolder.textContent;
+      btnBrowseFolder.textContent = 'Opening…';
+      try {
+        const res = await fetch('/pick-folder', { method: 'POST' });
+        const data = await res.json();
+        if (data.path) {
+          input.value = data.path;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        // If cancelled, just do nothing
+      } catch (err) {
+        showError('Folder picker failed: ' + err.message);
+      } finally {
+        btnBrowseFolder.disabled = false;
+        btnBrowseFolder.textContent = orig;
+      }
+    });
+  }
+
   btnClearAll.addEventListener('click', () => {
     selectedFiles = [];
     generatedImages = [];
@@ -1529,6 +1655,7 @@
     formData.append('shots', JSON.stringify([...selectedShots]));
     formData.append('customInstruction', genState.customInstruction);
     formData.append('provider', selectedProvider);
+    formData.append('autoMatchRing', autoMatchRingCheckbox.checked ? '1' : '0');
 
     try {
       const res  = await fetch('/generate', { method: 'POST', body: formData });
@@ -1639,6 +1766,7 @@
     formData.append('angleId', shotId);
     formData.append('customInstruction', genState.customInstruction);
     formData.append('provider', selectedProvider);
+    formData.append('autoMatchRing', autoMatchRingCheckbox.checked ? '1' : '0');
 
     try {
       const res  = await fetch('/generate-angle', { method: 'POST', body: formData });
@@ -1728,6 +1856,15 @@
   const statusShotEl     = document.getElementById('status-shot');
   const statusCountEl    = document.getElementById('status-count');
   const batchFolderMap   = {};
+  const batchShotsMap    = {};
+  const lockedShots      = new Set(); // keys: `${productName}::${angleId}`
+
+  function lockKey(p, a) { return `${p}::${a}`; }
+  function isLocked(p, a) { return lockedShots.has(lockKey(p, a)); }
+  function setLock(p, a, on) {
+    const k = lockKey(p, a);
+    if (on) lockedShots.add(k); else lockedShots.delete(k);
+  }
 
   let batchTotalShots = 0;
   let batchDoneShots  = 0;
@@ -1759,6 +1896,9 @@
     const customInstruction = customInput.value.trim();
     if (!folderPath || selectedShots.size === 0) return;
 
+    // Record folder in recents
+    if (!isResume && typeof pushRecentFolder === 'function') pushRecentFolder(folderPath);
+
     // Save batch params for resume
     lastBatchParams = { folderPath, customInstruction, shots: [...selectedShots], provider: selectedProvider };
 
@@ -1767,6 +1907,7 @@
       batchResultsEl.innerHTML = '';
       batchResultsEl.classList.remove('visible');
       Object.keys(batchFolderMap).forEach(k => delete batchFolderMap[k]);
+      Object.keys(batchShotsMap).forEach(k => delete batchShotsMap[k]);
     } else {
       addLog('\n── Resuming batch... ──', 'info');
     }
@@ -1783,6 +1924,7 @@
     const shotsParam = encodeURIComponent(JSON.stringify([...selectedShots]));
     let url = `/batch?folderPath=${encodeURIComponent(folderPath)}&shots=${shotsParam}&provider=${encodeURIComponent(selectedProvider)}`;
     if (customInstruction) url += `&customInstruction=${encodeURIComponent(customInstruction)}`;
+    if (autoMatchRingCheckbox.checked) url += '&autoMatchRing=1';
     if (isResume) url += '&resume=1';
     const src = new EventSource(url);
 
@@ -1877,6 +2019,8 @@
 
   function addBatchProductSection(productName, productFolder) {
     batchFolderMap[productName] = productFolder || '';
+    const productShots = [...selectedShots].filter(id => shotCatalog[id]);
+    batchShotsMap[productName] = productShots;
     batchResultsEl.classList.add('visible');
 
     const section = document.createElement('div');
@@ -1884,12 +2028,34 @@
 
     const titleEl = document.createElement('div');
     titleEl.className = 'batch-product-title';
-    titleEl.textContent = productName;
+
+    const titleText = document.createElement('span');
+    titleText.textContent = productName;
+
+    const retryAllBtn = document.createElement('button');
+    retryAllBtn.className = 'btn-retry btn-retry-product';
+    retryAllBtn.textContent = 'Retry all';
+    retryAllBtn.addEventListener('click', () => retryEntireProduct(productName, retryAllBtn, null));
+
+    const fixAllBtn = document.createElement('button');
+    fixAllBtn.className = 'btn-retry btn-retry-product';
+    fixAllBtn.textContent = 'Fix with feedback...';
+    fixAllBtn.addEventListener('click', () => {
+      const fb = window.prompt(`What's wrong with ${productName}? (applies to ALL shots for this product)`);
+      if (fb && fb.trim()) retryEntireProduct(productName, fixAllBtn, fb.trim());
+    });
+
+    const dlFolderBtn = document.createElement('button');
+    dlFolderBtn.className = 'btn-retry btn-retry-product';
+    dlFolderBtn.textContent = 'Download folder';
+    dlFolderBtn.addEventListener('click', () => downloadProductFolder(productName, dlFolderBtn));
+
+    titleEl.append(titleText, retryAllBtn, fixAllBtn, dlFolderBtn);
 
     const grid = document.createElement('div');
     grid.className = 'batch-angles-grid';
 
-    [...selectedShots].forEach(shotId => {
+    productShots.forEach(shotId => {
       const shot = shotCatalog[shotId];
       if (!shot) return;
       const ph = document.createElement('div');
@@ -1946,36 +2112,196 @@
       a.click();
     });
 
-    const retryBtn = document.createElement('button');
-    retryBtn.className = 'btn-retry';
-    retryBtn.textContent = 'Retry';
-    retryBtn.addEventListener('click', async () => {
-      retryBtn.disabled = true;
-      retryBtn.textContent = 'Retrying...';
+    async function doSingleRetry(btn, feedback) {
+      const origLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = feedback ? 'Fixing...' : 'Retrying...';
       img.style.opacity = '0.35';
       try {
         const res = await fetch('/retry-angle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider }),
+          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0' }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Retry failed.');
         if (data.usage) updateCostBar(data.usage);
         img.src = `data:image/png;base64,${data.base64}`;
-        retryBtn.textContent = 'Retry';
+        btn.textContent = origLabel;
       } catch (err) {
-        retryBtn.textContent = 'Failed';
-        setTimeout(() => { retryBtn.textContent = 'Retry'; }, 2500);
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = origLabel; }, 2500);
       } finally {
-        retryBtn.disabled = false;
+        btn.disabled = false;
         img.style.opacity = '';
       }
+    }
+
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'btn-retry';
+    retryBtn.textContent = 'Retry';
+    retryBtn.addEventListener('click', () => doSingleRetry(retryBtn, null));
+
+    const fixBtn = document.createElement('button');
+    fixBtn.className = 'btn-retry';
+    fixBtn.textContent = 'Fix...';
+    fixBtn.title = 'Retry with a specific correction';
+    fixBtn.addEventListener('click', () => {
+      const fb = window.prompt(`What's wrong with ${label}? Describe what to fix:`);
+      if (fb && fb.trim()) doSingleRetry(fixBtn, fb.trim());
     });
 
-    actions.append(dlBtn, retryBtn);
+    const lockBtn = document.createElement('button');
+    lockBtn.className = 'btn-retry btn-lock';
+    const renderLock = () => {
+      const on = isLocked(productName, angleId);
+      lockBtn.textContent = on ? '🔒 Locked' : '🔓 Lock';
+      lockBtn.title = on
+        ? 'This shot is locked — Retry all / Fix all will skip it'
+        : 'Lock this shot so bulk retries skip it';
+      card.classList.toggle('locked', on);
+    };
+    lockBtn.addEventListener('click', () => {
+      setLock(productName, angleId, !isLocked(productName, angleId));
+      renderLock();
+    });
+    renderLock();
+
+    const promptBtn = document.createElement('button');
+    promptBtn.className = 'btn-retry';
+    promptBtn.textContent = 'ℹ️ Prompt';
+    promptBtn.title = 'Inspect the exact prompt that was sent for this shot';
+    promptBtn.addEventListener('click', () => openPromptInspector(angleId, label));
+
+    actions.append(dlBtn, retryBtn, fixBtn, lockBtn, promptBtn);
     card.append(labelEl, img, actions);
     placeholder.replaceWith(card);
+  }
+
+  async function retryEntireProduct(productName, triggerBtn, feedback = null) {
+    const productFolder = batchFolderMap[productName];
+    const shotIds       = batchShotsMap[productName] || [];
+    if (!productFolder || shotIds.length === 0) return;
+
+    triggerBtn.disabled = true;
+    const origLabel = triggerBtn.textContent;
+    triggerBtn.textContent = feedback ? 'Fixing...' : 'Retrying...';
+
+    const activeShotIds = shotIds.filter(id => !isLocked(productName, id));
+    const skippedCount  = shotIds.length - activeShotIds.length;
+    if (activeShotIds.length === 0) {
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = origLabel;
+      setStatus(productName, `All shots are locked — nothing to retry`);
+      setTimeout(() => setStatus('', ''), 2200);
+      return;
+    }
+
+    let failed = 0;
+    for (let i = 0; i < activeShotIds.length; i++) {
+      const angleId = activeShotIds[i];
+      const shot    = shotCatalog[angleId];
+      const label   = shot ? shot.label : angleId;
+
+      const skippedNote = skippedCount > 0 ? ` • ${skippedCount} locked` : '';
+      setStatus(productName, `${feedback ? 'Fixing' : 'Retrying'} ${label} (${i + 1}/${activeShotIds.length})${skippedNote}`);
+
+      // Mark the card as in-progress (dim it if it's a result-card, reset spinner if it's a failed placeholder)
+      const existing = document.getElementById(cardId(productName, angleId));
+      const existingImg = existing ? existing.querySelector('img') : null;
+      if (existingImg) existingImg.style.opacity = '0.35';
+      if (existing && existing.classList.contains('batch-angle-pending')) {
+        existing.classList.remove('queued');
+        const sp = existing.querySelector('.mini-spinner');
+        if (sp) sp.style.borderTopColor = '';
+        const lb = existing.querySelector('span');
+        if (lb) { lb.style.color = ''; lb.textContent = label; }
+      }
+
+      try {
+        const res = await fetch('/retry-angle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0' }),
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Retry failed');
+        if (data.usage) updateCostBar(data.usage);
+
+        if (existingImg) {
+          existingImg.src = `data:image/png;base64,${data.base64}`;
+          existingImg.style.opacity = '';
+        } else {
+          // No result-card yet (was a failed placeholder) — render one.
+          renderBatchAngleCard(productName, angleId, label, null);
+          const newImg = document.querySelector(`#${CSS.escape(cardId(productName, angleId))} img`);
+          if (newImg) newImg.src = `data:image/png;base64,${data.base64}`;
+        }
+      } catch (err) {
+        failed++;
+        if (existingImg) existingImg.style.opacity = '';
+        markBatchAngleFailed(productName, angleId);
+        addLog(`  ✗ retry ${productName}/${angleId}: ${err.message}`, 'err');
+      }
+    }
+
+    setStatus('', '');
+    triggerBtn.disabled = false;
+    triggerBtn.textContent = failed === 0 ? origLabel : `${failed} failed — retry again`;
+    if (failed > 0) setTimeout(() => { triggerBtn.textContent = origLabel; }, 4000);
+  }
+
+  async function downloadProductFolder(productName, triggerBtn) {
+    const shotIds = batchShotsMap[productName] || [];
+    if (shotIds.length === 0) return;
+
+    triggerBtn.disabled = true;
+    const origLabel = triggerBtn.textContent;
+    triggerBtn.textContent = 'Packing...';
+
+    try {
+      const images = [];
+      for (const angleId of shotIds) {
+        const card = document.getElementById(cardId(productName, angleId));
+        const im   = card ? card.querySelector('img') : null;
+        if (!im || !im.src) continue;
+        const resp = await fetch(im.src);
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        const b64  = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => {
+            const s = String(r.result || '');
+            resolve(s.includes(',') ? s.split(',')[1] : s);
+          };
+          r.onerror = reject;
+          r.readAsDataURL(blob);
+        });
+        images.push({ name: `${productName}_${angleId}.png`, data: b64 });
+      }
+
+      if (images.length === 0) throw new Error('No images ready for this product');
+
+      const res = await fetch('/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images }),
+      });
+      if (!res.ok) throw new Error('ZIP generation failed');
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${productName.replace(/[^\w\-]+/g, '_')}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      triggerBtn.textContent = origLabel;
+    } catch (err) {
+      triggerBtn.textContent = 'Failed';
+      setTimeout(() => { triggerBtn.textContent = origLabel; }, 2500);
+    } finally {
+      triggerBtn.disabled = false;
+    }
   }
 
   function markBatchAngleFailed(productName, angleId) {
@@ -2228,8 +2554,151 @@
     }
   });
 
+  // ═══ Prompt inspector modal ═══════════════════════════════════════════════
+  const promptModal     = document.getElementById('prompt-modal');
+  const promptModalTitle = document.getElementById('prompt-modal-title');
+  const promptModalBody = document.getElementById('prompt-modal-body');
+  const promptModalClose = document.getElementById('prompt-modal-close');
+  const promptModalCopy  = document.getElementById('prompt-modal-copy');
+
+  async function openPromptInspector(shotId, label) {
+    promptModalTitle.textContent = `Prompt — ${label}`;
+    promptModalBody.textContent  = 'Loading…';
+    promptModal.classList.add('visible');
+    try {
+      const res = await fetch('/prompt-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shotId,
+          customInstruction: customInput.value.trim(),
+          hasAnchor: true, // batch-result cards were all generated with the anchor reference
+          autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Preview failed');
+      promptModalBody.textContent = data.prompt;
+    } catch (err) {
+      promptModalBody.textContent = 'Failed to load prompt: ' + err.message;
+    }
+  }
+
+  promptModalClose.addEventListener('click', () => promptModal.classList.remove('visible'));
+  promptModal.addEventListener('click', (e) => {
+    if (e.target === promptModal) promptModal.classList.remove('visible');
+  });
+  promptModalCopy.addEventListener('click', () => {
+    navigator.clipboard.writeText(promptModalBody.textContent || '').then(() => {
+      promptModalCopy.textContent = 'Copied ✓';
+      setTimeout(() => { promptModalCopy.textContent = 'Copy prompt'; }, 1500);
+    });
+  });
+
+  // ═══ Recent folders (localStorage) ════════════════════════════════════════
+  const RECENT_FOLDERS_KEY = 'hom.recentFolders';
+  const MAX_RECENT = 8;
+
+  function getRecentFolders() {
+    try { return JSON.parse(localStorage.getItem(RECENT_FOLDERS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function pushRecentFolder(p) {
+    if (!p) return;
+    const list = getRecentFolders().filter(x => x !== p);
+    list.unshift(p);
+    if (list.length > MAX_RECENT) list.length = MAX_RECENT;
+    localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(list));
+  }
+
+  const recentBtn   = document.getElementById('btn-recent-folders');
+  const recentMenu  = document.getElementById('recent-folders-menu');
+
+  function renderRecentMenu() {
+    const list = getRecentFolders();
+    recentMenu.innerHTML = '';
+    if (list.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'recent-empty';
+      empty.textContent = 'No recent folders yet';
+      recentMenu.appendChild(empty);
+      return;
+    }
+    list.forEach(p => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = p;
+      b.title = p;
+      b.addEventListener('click', () => {
+        folderPathInput.value = p;
+        folderPathInput.dispatchEvent(new Event('input', { bubbles: true }));
+        recentMenu.classList.remove('visible');
+      });
+      recentMenu.appendChild(b);
+    });
+  }
+
+  if (recentBtn && recentMenu) {
+    recentBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderRecentMenu();
+      recentMenu.classList.toggle('visible');
+    });
+    document.addEventListener('click', (e) => {
+      if (!recentMenu.contains(e.target) && e.target !== recentBtn) {
+        recentMenu.classList.remove('visible');
+      }
+    });
+  }
+
+  // Also record when user picks via Browse
+  if (btnBrowseFolder) {
+    btnBrowseFolder.addEventListener('click', () => {
+      // Defer to let the original handler set the value first
+      setTimeout(() => {
+        const v = folderPathInput.value.trim();
+        if (v) pushRecentFolder(v);
+      }, 100);
+    });
+  }
+
+  // ═══ Keyboard shortcuts ═══════════════════════════════════════════════════
+  document.addEventListener('keydown', (e) => {
+    // Don't intercept when user is typing in an input/textarea
+    const tag = (e.target && e.target.tagName) || '';
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable;
+
+    // Cmd/Ctrl+Enter → Generate / Process Batch
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (!btnGenerate.disabled) btnGenerate.click();
+      return;
+    }
+
+    // Esc → close modals / menus
+    if (e.key === 'Escape') {
+      promptModal.classList.remove('visible');
+      if (recentMenu) recentMenu.classList.remove('visible');
+      return;
+    }
+
+    if (typing) return;
+
+    // Card-focused shortcuts — if a result-card is hovered, apply to it
+    const hovered = document.querySelector('.result-card:hover');
+    if (!hovered) return;
+    const retryOnCard  = hovered.querySelector('.btn-retry:not(.btn-lock):not([data-fix])');
+    const dlOnCard     = hovered.querySelector('.btn-dl');
+    const lockOnCard   = hovered.querySelector('.btn-lock');
+
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); retryOnCard?.click(); }
+    else if (e.key === 'd' || e.key === 'D') { e.preventDefault(); dlOnCard?.click(); }
+    else if (e.key === 'l' || e.key === 'L') { e.preventDefault(); lockOnCard?.click(); }
+  });
+
   // ── Init ──────────────────────────────────────────────────────────────────
   loadCatalog();
 </script>
+
 </body>
 </html>

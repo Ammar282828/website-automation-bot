@@ -5,6 +5,7 @@ const multer       = require('multer');
 const path         = require('path');
 const fs           = require('fs');
 const os           = require('os');
+const crypto       = require('crypto');
 const { execFile } = require('child_process');
 const sharp        = require('sharp');
 const { GoogleGenAI } = require('@google/genai');
@@ -20,7 +21,15 @@ process.on('unhandledRejection', (reason) => {
 const PORT = process.env.PORT || 3000;
 
 // ── Provider clients ───────────────────────────────────────────────────────
-const geminiClient = process.env.GOOGLE_API_KEY ? new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY }) : null;
+// Auto-detect Vertex AI Express Mode keys (AQ.*) vs AI Studio keys (AIza*)
+const googleKey = process.env.GOOGLE_API_KEY;
+const isVertexKey = googleKey && googleKey.startsWith('AQ.');
+const geminiClient = googleKey
+    ? (isVertexKey
+        ? new GoogleGenAI({ vertexai: true, apiKey: googleKey })
+        : new GoogleGenAI({ apiKey: googleKey }))
+    : null;
+if (googleKey) console.log(`[Gemini] Using ${isVertexKey ? 'Vertex AI Express Mode' : 'AI Studio'} key`);
 const openaiClient = process.env.OPENAI_API_KEY  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 // Which providers are available
@@ -69,6 +78,163 @@ function trackUsage(provider, shotId) {
     return entry;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Pipeline enhancements: caches, QC, fallback, budget, audit, post-process
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CACHE_DIR        = path.join(__dirname, '.cache');
+const OUTPUT_CACHE_DIR = path.join(CACHE_DIR, 'outputs');
+const JPEG_CACHE_DIR   = path.join(CACHE_DIR, 'jpeg');
+const AUDIT_LOG_PATH   = path.join(__dirname, 'audit.log');
+fs.mkdirSync(OUTPUT_CACHE_DIR, { recursive: true });
+fs.mkdirSync(JPEG_CACHE_DIR,   { recursive: true });
+
+function sha1(buf) {
+    return crypto.createHash('sha1').update(buf).digest('hex');
+}
+
+// ── Output cache (skips API call if same prompt+refs were generated before) ──
+function outputCacheKey(provider, shotId, prompt, imageInputs) {
+    const refHashes = imageInputs
+        .map(i => sha1(Buffer.from(i.base64, 'base64')))
+        .sort()
+        .join(',');
+    return sha1(`${provider}|${shotId}|${prompt}|${refHashes}`);
+}
+function outputCacheGet(key) {
+    const p = path.join(OUTPUT_CACHE_DIR, `${key}.png`);
+    return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : null;
+}
+function outputCachePut(key, base64) {
+    try {
+        fs.writeFileSync(path.join(OUTPUT_CACHE_DIR, `${key}.png`), Buffer.from(base64, 'base64'));
+    } catch (e) { /* non-fatal */ }
+}
+
+// ── JPEG cache (skips sips/sharp HEIC conversion on re-runs) ──
+function jpegCacheGet(hash) {
+    const p = path.join(JPEG_CACHE_DIR, `${hash}.jpg`);
+    return fs.existsSync(p) ? fs.readFileSync(p) : null;
+}
+function jpegCachePut(hash, jpegBuffer) {
+    try {
+        fs.writeFileSync(path.join(JPEG_CACHE_DIR, `${hash}.jpg`), jpegBuffer);
+    } catch (e) { /* non-fatal */ }
+}
+
+// ── Audit log (one JSONL line per generation) ──
+function audit(entry) {
+    try {
+        fs.appendFileSync(AUDIT_LOG_PATH, JSON.stringify({ ts: Date.now(), ...entry }) + '\n');
+    } catch (e) { /* non-fatal */ }
+}
+
+// ── Budget cap (hard stop if session cost exceeds $DAILY_BUDGET_USD) ──
+const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '0') || null;
+function budgetCheck() {
+    if (!DAILY_BUDGET_USD) return;
+    if (usageStats.session.total.cost >= DAILY_BUDGET_USD) {
+        throw new Error(
+            `Budget cap reached: session cost $${usageStats.session.total.cost.toFixed(3)} ≥ ` +
+            `$${DAILY_BUDGET_USD.toFixed(2)}. Raise DAILY_BUDGET_USD in .env or restart server to reset.`
+        );
+    }
+}
+
+// ── Post-process ecom shots: white-point lock + gentle sharpen ──
+async function postProcessEcom(base64) {
+    try {
+        const input = Buffer.from(base64, 'base64');
+        const img   = sharp(input);
+        const meta  = await img.metadata();
+        if (!meta.width || !meta.height) return base64;
+
+        // Sample four corners to see if the background is meant to be white
+        const corners = await Promise.all([
+            img.clone().extract({ left: 0, top: 0, width: 8, height: 8 }).stats(),
+            img.clone().extract({ left: meta.width - 8, top: 0, width: 8, height: 8 }).stats(),
+            img.clone().extract({ left: 0, top: meta.height - 8, width: 8, height: 8 }).stats(),
+            img.clone().extract({ left: meta.width - 8, top: meta.height - 8, width: 8, height: 8 }).stats(),
+        ]);
+        const allNearWhite = corners.every(s =>
+            s.channels.slice(0, 3).every(c => c.mean >= 240)
+        );
+
+        let pipeline = sharp(input).sharpen({ sigma: 0.6 });
+        if (allNearWhite) {
+            // Clamp the near-white background to pure #FFFFFF using a tight levels curve
+            pipeline = pipeline.linear(1.06, -12); // slight contrast lift
+        }
+        const out = await pipeline.png({ compressionLevel: 6 }).toBuffer();
+        return out.toString('base64');
+    } catch (e) {
+        console.warn('[PostProcess] skipped:', e.message);
+        return base64;
+    }
+}
+
+// ── QC pass: cheap Gemini text call to score fidelity vs references ──
+const QC_ENABLED   = process.env.QC_ENABLED !== '0';
+const QC_THRESHOLD = parseFloat(process.env.QC_THRESHOLD || '6.5');
+const QC_MODEL     = 'gemini-3.1-pro-preview';
+
+async function qcShot(generatedBase64, imageInputs, shotLabel) {
+    if (!QC_ENABLED || !geminiClient) return { score: 10, defects: '', skipped: true };
+    try {
+        const parts = [
+            { text:
+`You are a QA inspector for jewelry product photography. You will receive:
+  1. A GENERATED shot (first image) of type: ${shotLabel}
+  2. One or more REFERENCE photos of the actual jewelry piece
+
+Score the generated shot 0–10 on FIDELITY to the reference (is it the same piece?):
+- Stone count, stone color, stone cut
+- Metal tone (yellow gold / rose gold / silver)
+- Proportions and overall design
+- Setting style, prong count, pavé pattern
+Reply in EXACTLY this format, two lines only:
+SCORE: <number 0–10>
+DEFECTS: <one short sentence listing any mismatches, or "none">` },
+            { inlineData: { mimeType: 'image/png',  data: generatedBase64 } },
+            ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
+        ];
+        const response = await withTimeout(
+            geminiClient.models.generateContent({
+                model: QC_MODEL,
+                contents: [{ role: 'user', parts }],
+            }),
+            30000,
+            'QC'
+        );
+        const text = (response.candidates?.[0]?.content?.parts || [])
+            .map(p => p.text).filter(Boolean).join('').trim();
+        const scoreMatch = text.match(/SCORE:\s*(\d+(?:\.\d+)?)/i);
+        const defMatch   = text.match(/DEFECTS:\s*(.+)/i);
+        const score   = scoreMatch ? parseFloat(scoreMatch[1]) : 10;
+        const defects = defMatch   ? defMatch[1].trim()        : '';
+        return { score, defects, skipped: false };
+    } catch (e) {
+        console.warn('[QC] skipped:', e.message);
+        return { score: 10, defects: '', skipped: true };
+    }
+}
+
+// ── Provider fallback chain (used when primary 429s out) ──
+const PROVIDER_FALLBACK = {
+    gemini:    ['openai', 'nanobana2'],
+    nanobana2: ['gemini', 'openai'],
+    openai:    ['gemini', 'nanobana2'],
+};
+function availableFallbacks(primary) {
+    return (PROVIDER_FALLBACK[primary] || []).filter(p => PROVIDERS[p]);
+}
+function isFallbackWorthy(err) {
+    // 429/quota or hard-capped provider errors → fall back. Prompt/safety errors → don't.
+    const msg = String(err?.message || '').toLowerCase();
+    return is429(err) || /service unavailable|internal error|temporarily/i.test(msg);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ── Shot definitions ───────────────────────────────────────────────────────
 // Each shot has an id, label, category, and a function that builds the prompt
 const SHOT_CATALOG = {
@@ -152,7 +318,7 @@ const SHOT_CATALOG = {
 };
 
 // ── Prompt builders per shot ───────────────────────────────────────────────
-function buildShotPrompt(shotId, customInstruction, hasAnchor = false) {
+function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false) {
     const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.';
 
     // When an anchor reference is present, add IP-Adapter-style consistency conditioning
@@ -249,9 +415,25 @@ CAMERA: Low angle (15–20°), 100mm f/2.8, shallow depth. Cinematic, editorial,
 
     const scene = scenes[shotId] || scenes.ecom_hero;
 
+    const ringMatchBlock = autoMatchRing
+        ? `\nCOMPLEMENTARY RING PAIRING — CONDITIONAL:
+First, audit ALL of the reference photos provided (every raw reference AND every inspo/inspiration image — scan every single one before deciding). Determine two things:
+  1. Is the primary piece a bracelet, bangle, or cuff?
+  2. Does a ring appear ANYWHERE across the full set of reference images (worn on a finger, laid beside the bracelet, on a stand, in a flat-lay, even partially visible in the corner of an inspo shot)?
+
+Decision rules — apply in order, stop at the first match:
+  • If the primary piece is NOT a bracelet/bangle/cuff → IGNORE this entire instruction. Do nothing. Do not add any ring.
+  • If a ring IS visible in ANY reference image (raw OR inspo, any angle, any prominence) → IGNORE this entire instruction. The user has already specified the ring; do not invent a different one, do not add an additional ring. Reproduce that existing ring faithfully if it would naturally appear in the scene.
+  • ONLY if the primary piece IS a bracelet/bangle/cuff AND zero rings appear in any of the reference images → design a coordinated matching ring and include it in this output. The ring must share the EXACT same metal tone, the same stone type/color/cut/setting style, and the same design language as the bracelet — they must read as a deliberately designed pair from the same collection, not a random ring. Place it appropriately for the scene: for ecommerce/product shots, position the ring elegantly next to the bracelet on the same surface; for model shots of the wrist/hand, place the ring on the ring finger of the same hand that is wearing the bracelet.
+
+When in doubt, DO NOT add a ring. Adding an unwanted ring is a worse failure than omitting one.
+`
+        : '';
+
     const parts = [
         base,
         anchorBlock,
+        ringMatchBlock,
         scene,
         '',
         'OUTPUT: Square 1:1 aspect ratio. Photorealistic — indistinguishable from a real photograph. No AI artifacts, no floating elements, no impossible reflections.',
@@ -358,6 +540,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     const shotIds           = JSON.parse(req.body.shots || '[]');
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
+    const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
 
     if (shotIds.length === 0) return res.status(400).json({ error: 'No shots selected.' });
 
@@ -386,7 +569,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
         // Generate anchor shot (no anchor reference for the anchor itself)
         console.log(`[Anchor] Generating ${anchorId} as consistency anchor via ${provider}...`);
         const anchorShot = SHOT_CATALOG[anchorId];
-        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
+        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing);
         anchorRef = { base64: anchorData, mimeType: 'image/png' };
         results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorData });
 
@@ -398,7 +581,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
             const parallel = await Promise.all(remaining.map(async (shotId) => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return null;
-                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider);
+                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing);
                 return { id: shotId, label: shot.label, category: shot.category, data };
             }));
             results.push(...parallel.filter(Boolean));
@@ -426,6 +609,7 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     const shotId            = req.body.angleId;
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
+    const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
 
     const imageInputs = await Promise.all(req.files.map(async (f) => {
         const buf = await toJpeg(f.originalname || '', f.buffer);
@@ -436,7 +620,7 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
         const shot = SHOT_CATALOG[shotId];
         if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
-        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider);
+        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing);
         res.json({ success: true, imageData, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
@@ -487,6 +671,7 @@ app.get('/batch', async (req, res) => {
     const shotIds           = JSON.parse(req.query.shots || '[]');
     const provider          = (req.query.provider || 'gemini').trim();
     const resume            = req.query.resume === '1';
+    const autoMatchRing     = req.query.autoMatchRing === '1';
 
     if (!folderPath) { send({ type: 'error', message: 'No folder path provided.' }); return res.end(); }
     if (!fs.existsSync(folderPath)) { send({ type: 'error', message: `Folder not found: ${folderPath}` }); return res.end(); }
@@ -505,31 +690,36 @@ app.get('/batch', async (req, res) => {
     activeBatchId = Date.now().toString();
     batchCancelled = false;
 
-    send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds, resume });
-    console.log(`[Batch] Starting — ${productDirs.length} product(s), shots: ${shotIds.join(', ')}`);
+    const PRODUCT_CONCURRENCY = Math.max(1, parseInt(process.env.PRODUCT_CONCURRENCY || '2', 10));
+    send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds, resume, productConcurrency: PRODUCT_CONCURRENCY });
+    console.log(`[Batch] Starting — ${productDirs.length} product(s), ${PRODUCT_CONCURRENCY} in parallel, shots: ${shotIds.join(', ')}`);
 
-    for (const { name: productName, fullPath: productFolder } of productDirs) {
-        if (clientDisconnected) {
-            console.log('[SSE] Client disconnected, stopping batch.');
-            break;
-        }
-        if (batchCancelled) {
-            send({ type: 'cancelled', message: 'Batch cancelled by user.' });
-            break;
-        }
+    // Process a single product (extracted so we can run N in parallel)
+    async function processProduct(productName, productFolder) {
+        if (clientDisconnected || batchCancelled) return;
 
         send({ type: 'product_start', product: productName, productFolder });
         console.log(`\n[Product] ▶ ${productName}`);
 
         try {
             const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+            // Sort by file size desc — largest files (usually highest resolution) come first,
+            // so the anchor-first pipeline picks the best reference.
             const imageFiles = fs.readdirSync(productFolder)
                 .filter(f => IMAGE_EXTS.test(f) && !f.startsWith('.'))
-                .map(f => path.join(productFolder, f));
+                .map(f => {
+                    const full = path.join(productFolder, f);
+                    let size = 0;
+                    try { size = fs.statSync(full).size; } catch (e) {}
+                    return { full, size };
+                })
+                .sort((a, b) => b.size - a.size)
+                .map(x => x.full);
 
             if (imageFiles.length === 0) {
                 send({ type: 'product_error', product: productName, message: 'No images found in folder.' });
-                continue;
+                send({ type: 'product_done', product: productName });
+                return;
             }
 
             const imageInputs = await Promise.all(imageFiles.map(async (fp) => {
@@ -552,7 +742,7 @@ app.get('/batch', async (req, res) => {
                         send({ type: 'angle_skipped', product: productName, angle: shotId, label: shot.label, savedTo: outPath });
                     }
                     send({ type: 'product_done', product: productName, skipped: true });
-                    continue;
+                    return;
                 }
             }
 
@@ -575,7 +765,7 @@ app.get('/batch', async (req, res) => {
                 send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
                 console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
                 try {
-                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider);
+                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing);
                     anchorRef = { base64: b64, mimeType: 'image/png' };
                     fs.writeFileSync(anchorOutPath, Buffer.from(b64, 'base64'));
                     send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: anchorOutPath });
@@ -589,8 +779,7 @@ app.get('/batch', async (req, res) => {
 
             if (batchCancelled) {
                 send({ type: 'product_done', product: productName });
-                send({ type: 'cancelled', message: 'Batch cancelled by user.' });
-                break;
+                return;
             }
 
             // All remaining shots get the anchor reference
@@ -616,7 +805,7 @@ app.get('/batch', async (req, res) => {
             const parallelTasks = toGenerate.map(shotId => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return Promise.resolve();
-                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider)
+                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing)
                     .then(b64 => {
                         const p = path.join(outDir, `${shotId}.png`);
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
@@ -638,11 +827,21 @@ app.get('/batch', async (req, res) => {
 
         send({ type: 'product_done', product: productName });
         console.log(`[Product] ✓ Done: ${productName}`);
+    }
 
-        if (batchCancelled) {
-            send({ type: 'cancelled', message: 'Batch cancelled by user.' });
-            break;
+    // ── Concurrency driver: N products in parallel via a rolling worker pool ──
+    const queue = [...productDirs];
+    const workers = Array.from({ length: Math.min(PRODUCT_CONCURRENCY, queue.length) }, async () => {
+        while (queue.length && !clientDisconnected && !batchCancelled) {
+            const next = queue.shift();
+            if (!next) break;
+            await processProduct(next.name, next.fullPath);
         }
+    });
+    await Promise.all(workers);
+
+    if (batchCancelled) {
+        send({ type: 'cancelled', message: 'Batch cancelled by user.' });
     }
 
     clearInterval(heartbeat);
@@ -658,10 +857,50 @@ app.get('/batch', async (req, res) => {
     if (!clientDisconnected) res.end();
 });
 
+// ── Native folder picker (macOS) ────────────────────────────────────────────
+app.post('/pick-folder', (req, res) => {
+    if (process.platform !== 'darwin') {
+        return res.status(501).json({ error: 'Folder picker is only supported on macOS.' });
+    }
+    const script = [
+        'try',
+        'set f to choose folder with prompt "Select the batch folder of products"',
+        'return POSIX path of f',
+        'on error',
+        'return ""',
+        'end try',
+    ];
+    const args = [];
+    for (const line of script) { args.push('-e', line); }
+    execFile('osascript', args, { timeout: 5 * 60 * 1000 }, (err, stdout) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const picked = (stdout || '').trim();
+        if (!picked) return res.json({ cancelled: true });
+        // Strip trailing slash for a cleaner path
+        res.json({ path: picked.replace(/\/$/, '') });
+    });
+});
+
+// ── Prompt inspector (returns the exact prompt a shot would be sent) ────────
+app.post('/prompt-preview', (req, res) => {
+    const { shotId, customInstruction, hasAnchor, autoMatchRing } = req.body || {};
+    if (!shotId || !SHOT_CATALOG[shotId]) {
+        return res.status(400).json({ error: 'Unknown shotId.' });
+    }
+    const prompt = buildShotPrompt(
+        shotId,
+        (customInstruction || '').trim() || null,
+        !!hasAnchor,
+        autoMatchRing === true || autoMatchRing === '1' || autoMatchRing === 1
+    );
+    res.json({ shotId, prompt });
+});
+
 // ── Batch retry single shot ─────────────────────────────────────────────────
 app.post('/retry-angle', upload.none(), async (req, res) => {
-    const { productFolder, angleId, provider: retryProvider } = req.body;
+    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr } = req.body;
     const provider = (retryProvider || 'gemini').trim();
+    const autoMatchRing = rawAmr === '1' || rawAmr === 1 || rawAmr === true;
     if (!productFolder || !angleId) return res.status(400).json({ error: 'Missing productFolder or angleId.' });
 
     const shot = SHOT_CATALOG[angleId];
@@ -670,9 +909,22 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
     const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
     const imageFiles = fs.readdirSync(productFolder)
         .filter(f => IMAGE_EXTS.test(f) && !f.startsWith('.'))
-        .map(f => path.join(productFolder, f));
+        .map(f => {
+            const full = path.join(productFolder, f);
+            let size = 0;
+            try { size = fs.statSync(full).size; } catch (e) {}
+            return { full, size };
+        })
+        .sort((a, b) => b.size - a.size)
+        .map(x => x.full);
 
     if (imageFiles.length === 0) return res.status(400).json({ error: 'No source images in product folder.' });
+
+    // Feedback becomes a high-priority correction in the prompt's ADDITIONAL DIRECTION slot
+    const feedbackText = typeof feedback === 'string' ? feedback.trim() : '';
+    const correction = feedbackText
+        ? `USER FEEDBACK ON PREVIOUS ATTEMPT — FIX THIS: ${feedbackText}`
+        : null;
 
     try {
         const imageInputs = await Promise.all(imageFiles.map(async (fp) => {
@@ -681,7 +933,7 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
-        const raw = await generateShot(angleId, imageInputs, null, false, provider);
+        const raw = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
@@ -756,7 +1008,7 @@ Now look at the jewelry image(s) provided and write ONE WhatsApp community capti
             try {
                 const response = await geminiClient.models.generateContent({
                     model: 'gemini-3.1-pro-preview',
-                    contents: [{ parts }],
+                    contents: [{ role: 'user', parts }],
                 });
                 const resParts = response.candidates?.[0]?.content?.parts || [];
                 captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
@@ -769,7 +1021,7 @@ Now look at the jewelry image(s) provided and write ONE WhatsApp community capti
             try {
                 const response = await geminiClient.models.generateContent({
                     model: 'gemini-3.1-pro-preview',
-                    contents: [{ parts: [{ text: captionPrompt }] }],
+                    contents: [{ role: 'user', parts: [{ text: captionPrompt }] }],
                 });
                 const resParts = response.candidates?.[0]?.content?.parts || [];
                 captionText = resParts.map(p => p.text).filter(Boolean).join('').trim();
@@ -847,20 +1099,93 @@ function buildZip(entries) {
 }
 
 // ── Universal shot generator (multi-provider) ───────────────────────────────
-async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini') {
-    const prompt = buildShotPrompt(shotId, customInstruction, hasAnchor);
+async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false) {
+    const startedAt = Date.now();
+    const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing);
+    const isEcom   = shotId.startsWith('ecom_');
+    const shotLabel = SHOT_CATALOG[shotId]?.label || shotId;
 
-    let result;
-    if (provider === 'openai') {
-        result = await generateWithOpenAI(prompt, imageInputs);
-    } else if (provider === 'nanobana2') {
-        result = await generateWithNanoBana2(prompt, imageInputs);
-    } else {
-        result = await generateWithGemini(prompt, imageInputs);
+    // 1. Cache hit? Skip the API call entirely.
+    const cacheKey = outputCacheKey(provider, shotId, prompt, imageInputs);
+    const cached = outputCacheGet(cacheKey);
+    if (cached) {
+        console.log(`[Cache] HIT ${shotId} (${provider}) — $0`);
+        audit({ shotId, provider, cache: true, durationMs: Date.now() - startedAt });
+        return cached;
     }
 
-    trackUsage(provider, shotId);
-    return result;
+    // 2. Enforce daily budget cap if configured
+    budgetCheck();
+
+    // One generation attempt against a specific provider
+    const runOne = async (p, extraInstruction) => {
+        const effectivePrompt = extraInstruction
+            ? `${prompt}\n\nQC FEEDBACK FROM PREVIOUS ATTEMPT — FIX THIS: ${extraInstruction}`
+            : prompt;
+        let raw;
+        if (p === 'openai')         raw = await generateWithOpenAI(effectivePrompt, imageInputs);
+        else if (p === 'nanobana2') raw = await generateWithNanoBana2(effectivePrompt, imageInputs);
+        else                        raw = await generateWithGemini(effectivePrompt, imageInputs);
+        trackUsage(p, shotId);
+        return raw;
+    };
+
+    // 3. Primary provider, with automatic fallback on 429/transient errors
+    const chain = [provider, ...availableFallbacks(provider)];
+    let raw, usedProvider, lastErr;
+    for (let i = 0; i < chain.length; i++) {
+        const p = chain[i];
+        try {
+            raw = await runOne(p);
+            usedProvider = p;
+            if (i > 0) console.log(`[Fallback] ✓ Succeeded on ${p} after ${chain[0]} failed.`);
+            break;
+        } catch (err) {
+            lastErr = err;
+            if (i === chain.length - 1 || !isFallbackWorthy(err)) {
+                audit({ shotId, provider, ok: false, error: err.message, durationMs: Date.now() - startedAt });
+                throw err;
+            }
+            console.log(`[Fallback] ${p} failed (${err.message?.slice(0, 80)}), trying ${chain[i + 1]}...`);
+        }
+    }
+
+    // 4. Post-process ecom shots: white-point lock + gentle sharpen
+    if (isEcom) raw = await postProcessEcom(raw);
+
+    // 5. QC pass — if score below threshold, retry ONCE with defect feedback
+    const qc = await qcShot(raw, imageInputs, shotLabel);
+    let qcRetried = false;
+    if (!qc.skipped && qc.score < QC_THRESHOLD && qc.defects && qc.defects.toLowerCase() !== 'none') {
+        console.log(`[QC] ${shotId} scored ${qc.score}/10 (< ${QC_THRESHOLD}). Retrying with feedback: ${qc.defects}`);
+        qcRetried = true;
+        try {
+            let retryRaw = await runOne(usedProvider, qc.defects);
+            if (isEcom) retryRaw = await postProcessEcom(retryRaw);
+            const qc2 = await qcShot(retryRaw, imageInputs, shotLabel);
+            if (qc2.skipped || qc2.score >= qc.score) {
+                console.log(`[QC] retry scored ${qc2.skipped ? 'n/a' : qc2.score}, keeping retry.`);
+                raw = retryRaw;
+            } else {
+                console.log(`[QC] retry scored worse (${qc2.score}), keeping original.`);
+            }
+        } catch (err) {
+            console.warn(`[QC] retry generation failed, keeping original: ${err.message}`);
+        }
+    } else if (!qc.skipped) {
+        console.log(`[QC] ${shotId} scored ${qc.score}/10 ✓`);
+    }
+
+    // 6. Cache + audit
+    outputCachePut(cacheKey, raw);
+    audit({
+        shotId, provider: usedProvider, ok: true,
+        qcScore:   qc.skipped ? null : qc.score,
+        qcDefects: qc.defects || null,
+        qcRetried,
+        durationMs: Date.now() - startedAt,
+    });
+    return raw;
 }
 
 async function generateWithGemini(prompt, imageInputs) {
@@ -937,6 +1262,23 @@ function withTimeout(promise, ms, label = 'API call') {
 // ── Shared Gemini call with retry + backoff + concurrency ───────────────────
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [2000, 5000, 10000];
+// Separate, more generous schedule for 429/quota errors — 6 attempts over ~6 minutes
+const QUOTA_MAX_RETRIES = 6;
+const QUOTA_RETRY_DELAYS = [15000, 30000, 60000, 90000, 120000, 180000];
+
+function is429(err) {
+    const msg = String(err?.message || err || '');
+    return /\b429\b|RESOURCE_EXHAUSTED|Too Many Requests|quota/i.test(msg);
+}
+
+function retryDelay(err, attempt) {
+    if (is429(err)) return QUOTA_RETRY_DELAYS[attempt] || 180000;
+    return RETRY_DELAYS[attempt] || 5000;
+}
+
+function retryCap(err) {
+    return is429(err) ? QUOTA_MAX_RETRIES : MAX_RETRIES;
+}
 
 const MAX_CONCURRENT = 3;
 let activeGeminiCalls = 0;
@@ -968,7 +1310,7 @@ async function callGemini(parts, attempt = 0) {
         const response = await withTimeout(
             geminiClient.models.generateContent({
                 model: 'gemini-3-pro-image-preview',
-                contents: [{ parts }],
+                contents: [{ role: 'user', parts }],
                 config: { responseModalities: ['TEXT', 'IMAGE'] },
             }),
             API_TIMEOUT_MS,
@@ -994,9 +1336,11 @@ async function callGemini(parts, attempt = 0) {
         console.log('[Gemini] image OK');
         return imagePart.inlineData.data;
     } catch (err) {
-        if (attempt < MAX_RETRIES - 1) {
-            const delay = RETRY_DELAYS[attempt] || 5000;
-            console.log(`[Gemini] retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+        const cap = retryCap(err);
+        if (attempt < cap - 1) {
+            const delay = retryDelay(err, attempt);
+            const label = is429(err) ? 'quota-backoff' : 'retry';
+            console.log(`[Gemini] ${label} ${attempt + 1}/${cap} in ${Math.round(delay / 1000)}s (${err?.message?.slice(0, 80) || ''})`);
             await new Promise(r => setTimeout(r, delay));
             return callGemini(parts, attempt + 1);
         }
@@ -1013,7 +1357,7 @@ async function callNanoBana2(parts, attempt = 0) {
         const response = await withTimeout(
             geminiClient.models.generateContent({
                 model: 'gemini-3.1-flash-image-preview',
-                contents: [{ parts }],
+                contents: [{ role: 'user', parts }],
                 config: {
                     responseModalities: ['TEXT', 'IMAGE'],
                     imageConfig: {
@@ -1045,9 +1389,11 @@ async function callNanoBana2(parts, attempt = 0) {
         console.log('[NanoBana2] image OK');
         return imagePart.inlineData.data;
     } catch (err) {
-        if (attempt < MAX_RETRIES - 1) {
-            const delay = RETRY_DELAYS[attempt] || 5000;
-            console.log(`[NanoBana2] retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms...`);
+        const cap = retryCap(err);
+        if (attempt < cap - 1) {
+            const delay = retryDelay(err, attempt);
+            const label = is429(err) ? 'quota-backoff' : 'retry';
+            console.log(`[NanoBana2] ${label} ${attempt + 1}/${cap} in ${Math.round(delay / 1000)}s (${err?.message?.slice(0, 80) || ''})`);
             await new Promise(r => setTimeout(r, delay));
             return callNanoBana2(parts, attempt + 1);
         }
@@ -1075,6 +1421,12 @@ async function makeSquare(buffer) {
 
 async function toJpeg(filePathOrName, buffer) {
     const ext = path.extname(filePathOrName).toLowerCase();
+
+    // Content-addressed JPEG cache — skip sips/sharp on repeat runs of the same bytes
+    const bufHash = sha1(buffer);
+    const cachedJpg = jpegCacheGet(bufHash);
+    if (cachedJpg) return cachedJpg;
+
     if (ext === '.heic' || ext === '.heif') {
         // Try sips first (macOS native), then sharp as fallback
         const tmpDir = path.join(__dirname, '.tmp');
@@ -1091,11 +1443,15 @@ async function toJpeg(filePathOrName, buffer) {
                 30000,
                 'HEIC conversion'
             );
-            return fs.readFileSync(tmpOut);
+            const out = fs.readFileSync(tmpOut);
+            jpegCachePut(bufHash, out);
+            return out;
         } catch (sipsErr) {
             console.warn(`[HEIC] sips failed (${sipsErr.message}), trying sharp...`);
             try {
-                return await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+                const out = await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+                jpegCachePut(bufHash, out);
+                return out;
             } catch (sharpErr) {
                 console.error(`[HEIC] sharp also failed (${sharpErr.message}), skipping file`);
                 throw new Error(`Cannot convert HEIC file: ${filePathOrName}`);
@@ -1105,7 +1461,9 @@ async function toJpeg(filePathOrName, buffer) {
             if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
         }
     }
-    return sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+    const out = await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+    jpegCachePut(bufHash, out);
+    return out;
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
