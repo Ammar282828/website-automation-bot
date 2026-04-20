@@ -1184,11 +1184,18 @@
       <div class="field-label">Custom direction <span style="text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></div>
       <input type="text" id="custom-instruction" class="field-input" placeholder='e.g. "use rose gold tones" or "dramatic shadows"' />
     </div>
-    <label class="pair-toggle" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);cursor:pointer;">
+    <label class="pair-toggle" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);cursor:pointer;">
       <input type="checkbox" id="auto-match-ring" style="margin-top:3px;accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;" />
       <span style="display:flex;flex-direction:column;gap:2px;">
         <span style="font-size:0.78rem;font-weight:600;color:var(--text);">Auto-match ring for bracelets</span>
-        <span style="font-size:0.72rem;color:var(--muted);line-height:1.4;">If a bracelet / bangle / cuff has no matching ring in the source photos, generate a coordinated ring (same metal, stones, aesthetic) and include it in every shot.</span>
+        <span style="font-size:0.72rem;color:var(--muted);line-height:1.4;">If a bracelet / bangle / cuff has no matching ring in the source photos, generate a miniaturized version of the bracelet's design scaled down to a ring and include it in every shot.</span>
+      </span>
+    </label>
+    <label class="pair-toggle" style="display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);cursor:pointer;">
+      <input type="checkbox" id="multi-piece" style="margin-top:3px;accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;" />
+      <span style="display:flex;flex-direction:column;gap:2px;">
+        <span style="font-size:0.78rem;font-weight:600;color:var(--text);">Folder contains multiple pieces</span>
+        <span style="font-size:0.72rem;color:var(--muted);line-height:1.4;">Turn on when your reference photos include more than one distinct jewelry piece (e.g., a bangle AND a matching ring). The system will treat the largest / most photographed piece as the primary subject and keep companion pieces as context only — preventing the model from generating the wrong item.</span>
       </span>
     </label>
     <button class="btn-generate" id="btn-generate" disabled>Generate Shots</button>
@@ -1371,6 +1378,7 @@
   const resultsGrid   = document.getElementById('results-grid');
   const customInput   = document.getElementById('custom-instruction');
   const autoMatchRingCheckbox = document.getElementById('auto-match-ring');
+  const multiPieceCheckbox    = document.getElementById('multi-piece');
   const shotCountEl   = document.getElementById('shot-count');
   const btnDownloadAll = document.getElementById('btn-download-all');
 
@@ -1702,6 +1710,7 @@
     formData.append('customInstruction', genState.customInstruction);
     formData.append('provider', selectedProvider);
     formData.append('autoMatchRing', autoMatchRingCheckbox.checked ? '1' : '0');
+    formData.append('multiPiece', multiPieceCheckbox.checked ? '1' : '0');
 
     try {
       const res  = await fetch('/generate', { method: 'POST', body: formData });
@@ -1813,6 +1822,7 @@
     formData.append('customInstruction', genState.customInstruction);
     formData.append('provider', selectedProvider);
     formData.append('autoMatchRing', autoMatchRingCheckbox.checked ? '1' : '0');
+    formData.append('multiPiece', multiPieceCheckbox.checked ? '1' : '0');
 
     try {
       const res  = await fetch('/generate-angle', { method: 'POST', body: formData });
@@ -2070,6 +2080,7 @@
     let url = `/batch?folderPath=${encodeURIComponent(folderPath)}&shots=${shotsParam}&provider=${encodeURIComponent(selectedProvider)}`;
     if (customInstruction) url += `&customInstruction=${encodeURIComponent(customInstruction)}`;
     if (autoMatchRingCheckbox.checked) url += '&autoMatchRing=1';
+    if (multiPieceCheckbox.checked) url += '&multiPiece=1';
     if (isResume) url += '&resume=1';
     if (pendingSkipFolders.length > 0) url += `&skipFolders=${encodeURIComponent(JSON.stringify(pendingSkipFolders))}`;
     const src = new EventSource(url);
@@ -2324,7 +2335,7 @@
         const res = await fetch('/retry-angle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0' }),
+          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0', multiPiece: multiPieceCheckbox.checked ? '1' : '0' }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Retry failed.');
@@ -2425,7 +2436,7 @@
         const res = await fetch('/retry-angle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0' }),
+          body: JSON.stringify({ productFolder, angleId, provider: selectedProvider, feedback: feedback || '', autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0', multiPiece: multiPieceCheckbox.checked ? '1' : '0' }),
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || 'Retry failed');
@@ -2777,6 +2788,7 @@
           customInstruction: customInput.value.trim(),
           hasAnchor: true, // batch-result cards were all generated with the anchor reference
           autoMatchRing: autoMatchRingCheckbox.checked ? '1' : '0',
+          multiPiece: multiPieceCheckbox.checked ? '1' : '0',
         }),
       });
       const data = await res.json();

@@ -318,8 +318,24 @@ const SHOT_CATALOG = {
 };
 
 // ── Prompt builders per shot ───────────────────────────────────────────────
-function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false) {
+function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false, multiPiece = false) {
     const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.';
+
+    // Only when the user has flagged that the folder contains multiple distinct pieces.
+    // Without this flag we assume one piece per folder (the default, and how most users organise).
+    const primaryBlock = multiPiece
+        ? `\nMULTI-PIECE FOLDER — USER-DECLARED: The user has indicated this folder contains reference photos for MORE THAN ONE distinct jewelry piece (e.g., a bangle AND a matching ring, or a necklace AND earrings as a set). Pick the PRIMARY piece using these rules in order:
+  1. The piece that appears in the MAJORITY of the reference images is the primary subject.
+  2. If two pieces appear in equal numbers, the LARGER / MORE STRUCTURAL piece is primary (a bangle outranks a ring; a necklace outranks earrings; a maang tikka outranks small studs).
+  3. Product shots (hero, angle, detail, flat, stand) must show ONLY the primary piece — do NOT substitute a companion piece as the subject.
+  4. Model shots show only the primary piece worn on the appropriate body part.
+  5. Group / flat-lay shots MAY include companion pieces as secondary decorative context, but the primary piece must remain the clear hero at larger size and more prominent positioning.
+
+CRITICAL: do NOT let a smaller companion piece become the subject. If a bangle and a ring both appear in the references, the bangle is the subject — the ring is context at most. If a necklace and earrings both appear, the necklace is the subject — earrings are context at most.
+
+If the user's ADDITIONAL DIRECTION (below) names a specific piece to focus on (e.g., "focus on the ring"), that override wins — use the named piece as the primary subject.
+`
+        : '';
 
     // When an anchor reference is present, add IP-Adapter-style consistency conditioning
     const anchorBlock = hasAnchor
@@ -424,7 +440,19 @@ First, audit ALL of the reference photos provided (every raw reference AND every
 Decision rules — apply in order, stop at the first match:
   • If the primary piece is NOT a bracelet/bangle/cuff → IGNORE this entire instruction. Do nothing. Do not add any ring.
   • If a ring IS visible in ANY reference image (raw OR inspo, any angle, any prominence) → IGNORE this entire instruction. The user has already specified the ring; do not invent a different one, do not add an additional ring. Reproduce that existing ring faithfully if it would naturally appear in the scene.
-  • ONLY if the primary piece IS a bracelet/bangle/cuff AND zero rings appear in any of the reference images → design a coordinated matching ring and include it in this output. The ring must share the EXACT same metal tone, the same stone type/color/cut/setting style, and the same design language as the bracelet — they must read as a deliberately designed pair from the same collection, not a random ring. Place it appropriately for the scene: for ecommerce/product shots, position the ring elegantly next to the bracelet on the same surface; for model shots of the wrist/hand, place the ring on the ring finger of the same hand that is wearing the bracelet.
+  • ONLY if the primary piece IS a bracelet/bangle/cuff AND zero rings appear in any of the reference images → design a coordinated matching ring and include it in this output.
+
+WHEN YOU DESIGN THE RING — HARD CONSTRAINTS:
+The ring MUST be a faithful MINIATURIZATION of the bracelet's own design, not merely "coordinated" or "from the same collection". Treat it as if a jeweler literally shrank the bracelet's decorative face down to fit on a finger. Specifically:
+  • Transplant the bracelet's central motif / focal decorative element (the largest stone cluster, the main floral/geometric/paisley motif, the dominant filigree shape) onto the ring face. The motif becomes the ring's face, reduced in scale to fit a finger (~14–20 mm wide).
+  • Exact same metal tone, finish, and surface treatment (matte vs polished, yellow vs rose vs white gold, antiqued vs bright).
+  • Exact same stone material, color, cut, and setting technique (pavé, bezel, prong, kundan, polki, meenakari enamel — whatever the bracelet uses).
+  • Exact same ornamental language (beading, milgrain, granulation, engraving patterns) — if the bracelet has filigree curls, the ring has filigree curls at a smaller scale.
+  • The ring's shank/band is a simple slim version of the bracelet's band — same metal, same width proportion relative to the motif, no foreign design elements.
+  • Omit bracelet-specific structural parts (hinges, clasps, side wings, the full bangle circumference) — only the decorative face survives the shrink.
+  • Result test: a viewer should immediately say "that ring is clearly the matching miniature of this bracelet" at a single glance, not "that ring pairs nicely with this bracelet".
+
+Place it appropriately for the scene: for ecommerce/product shots, position the ring elegantly next to the bracelet on the same surface; for model shots of the wrist/hand, place the ring on the ring finger of the same hand wearing the bracelet.
 
 When in doubt, DO NOT add a ring. Adding an unwanted ring is a worse failure than omitting one.
 `
@@ -432,6 +460,7 @@ When in doubt, DO NOT add a ring. Adding an unwanted ring is a worse failure tha
 
     const parts = [
         base,
+        primaryBlock,
         anchorBlock,
         ringMatchBlock,
         scene,
@@ -576,6 +605,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
+    const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
 
     if (shotIds.length === 0) return res.status(400).json({ error: 'No shots selected.' });
 
@@ -604,7 +634,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
         // Generate anchor shot (no anchor reference for the anchor itself)
         console.log(`[Anchor] Generating ${anchorId} as consistency anchor via ${provider}...`);
         const anchorShot = SHOT_CATALOG[anchorId];
-        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing);
+        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
         anchorRef = { base64: anchorData, mimeType: 'image/png' };
         results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorData });
 
@@ -616,7 +646,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
             const parallel = await Promise.all(remaining.map(async (shotId) => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return null;
-                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing);
+                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing, multiPiece);
                 return { id: shotId, label: shot.label, category: shot.category, data };
             }));
             results.push(...parallel.filter(Boolean));
@@ -645,6 +675,7 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
+    const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
 
     const imageInputs = await Promise.all(req.files.map(async (f) => {
         const buf = await toJpeg(f.originalname || '', f.buffer);
@@ -655,7 +686,7 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
         const shot = SHOT_CATALOG[shotId];
         if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
-        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing);
+        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
         res.json({ success: true, imageData, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
@@ -707,6 +738,7 @@ app.get('/batch', async (req, res) => {
     const provider          = (req.query.provider || 'gemini').trim();
     const resume            = req.query.resume === '1';
     const autoMatchRing     = req.query.autoMatchRing === '1';
+    const multiPiece        = req.query.multiPiece === '1';
     // Pre-run skip list: JSON array of subfolder names the user unchecked
     let skipFolders = [];
     try { skipFolders = JSON.parse(req.query.skipFolders || '[]'); } catch (e) { skipFolders = []; }
@@ -820,7 +852,7 @@ app.get('/batch', async (req, res) => {
                 send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
                 console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
                 try {
-                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing);
+                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
                     anchorRef = { base64: b64, mimeType: 'image/png' };
                     fs.writeFileSync(anchorOutPath, Buffer.from(b64, 'base64'));
                     send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: anchorOutPath });
@@ -865,7 +897,7 @@ app.get('/batch', async (req, res) => {
             const parallelTasks = toGenerate.map(shotId => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return Promise.resolve();
-                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing)
+                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing, multiPiece)
                     .then(b64 => {
                         const p = path.join(outDir, `${shotId}.png`);
                         fs.writeFileSync(p, Buffer.from(b64, 'base64'));
@@ -944,7 +976,7 @@ app.post('/pick-folder', (req, res) => {
 
 // ── Prompt inspector (returns the exact prompt a shot would be sent) ────────
 app.post('/prompt-preview', (req, res) => {
-    const { shotId, customInstruction, hasAnchor, autoMatchRing } = req.body || {};
+    const { shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece } = req.body || {};
     if (!shotId || !SHOT_CATALOG[shotId]) {
         return res.status(400).json({ error: 'Unknown shotId.' });
     }
@@ -952,16 +984,18 @@ app.post('/prompt-preview', (req, res) => {
         shotId,
         (customInstruction || '').trim() || null,
         !!hasAnchor,
-        autoMatchRing === true || autoMatchRing === '1' || autoMatchRing === 1
+        autoMatchRing === true || autoMatchRing === '1' || autoMatchRing === 1,
+        multiPiece === true || multiPiece === '1' || multiPiece === 1
     );
     res.json({ shotId, prompt });
 });
 
 // ── Batch retry single shot ─────────────────────────────────────────────────
 app.post('/retry-angle', upload.none(), async (req, res) => {
-    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr } = req.body;
+    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr, multiPiece: rawMp } = req.body;
     const provider = (retryProvider || 'gemini').trim();
     const autoMatchRing = rawAmr === '1' || rawAmr === 1 || rawAmr === true;
+    const multiPiece = rawMp === '1' || rawMp === 1 || rawMp === true;
     if (!productFolder || !angleId) return res.status(400).json({ error: 'Missing productFolder or angleId.' });
 
     const shot = SHOT_CATALOG[angleId];
@@ -994,7 +1028,7 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
-        const raw = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing);
+        const raw = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing, multiPiece);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
@@ -1160,9 +1194,9 @@ function buildZip(entries) {
 }
 
 // ── Universal shot generator (multi-provider) ───────────────────────────────
-async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false) {
+async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false, multiPiece = false) {
     const startedAt = Date.now();
-    const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing);
+    const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece);
     const isEcom   = shotId.startsWith('ecom_');
     const shotLabel = SHOT_CATALOG[shotId]?.label || shotId;
 
