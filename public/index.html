@@ -656,6 +656,31 @@
     .recent-folders-menu button:last-child { border-bottom: none; }
     .recent-folders-menu .recent-empty { padding: 10px 12px; color: var(--muted); font-size: 0.75rem; }
 
+    /* Folder-scan pre-run list */
+    .scan-list { display: flex; flex-direction: column; gap: 4px; max-height: 55vh; overflow-y: auto; }
+    .scan-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); background: var(--surface);
+      cursor: pointer; user-select: none;
+      transition: background 0.12s ease;
+    }
+    .scan-item:hover { background: var(--surface2); }
+    .scan-item input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+    .scan-item-name { flex: 1; font-size: 0.85rem; color: var(--text); font-weight: 500; }
+    .scan-item-count { font-size: 0.72rem; color: var(--muted); }
+    .scan-item.disabled .scan-item-name,
+    .scan-item.disabled .scan-item-count { opacity: 0.45; text-decoration: line-through; }
+    .scan-empty { color: var(--muted); font-size: 0.85rem; padding: 16px; text-align: center; }
+
+    /* Mid-run skip button + skipped state */
+    .btn-skip-product { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-skip-product:hover:not(:disabled) { border-color: #B86060; color: #B86060; }
+    .batch-product-section.skipped { opacity: 0.5; }
+    .batch-product-section.skipped .batch-angle-pending,
+    .batch-product-section.skipped .result-card { filter: grayscale(0.4); }
+    .batch-product-section.skipped .mini-spinner { display: none; }
+
     #batch-log { width: 100%; display: none; flex-direction: column; gap: 8px; margin-top: 16px; }
     #batch-log.visible { display: flex; }
     #batch-status {
@@ -1277,6 +1302,27 @@
   </div>
 </div>
 
+<!-- Folder scan / pre-run exclusion modal -->
+<div class="modal-overlay" id="scan-modal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div class="modal-title">Which subfolders to process?</div>
+      <button class="modal-close" id="scan-modal-close" title="Close (Esc)">×</button>
+    </div>
+    <div class="modal-body" id="scan-modal-body">Scanning…</div>
+    <div class="modal-actions" style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;">
+        <button class="btn-retry" id="scan-modal-all" type="button">Select all</button>
+        <button class="btn-retry" id="scan-modal-none" type="button">Deselect all</button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-retry" id="scan-modal-cancel" type="button">Cancel</button>
+        <button class="btn-generate" id="scan-modal-start" type="button" style="padding:8px 18px;font-size:0.85rem;">Start batch</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── State ─────────────────────────────────────────────────────────────────
   let selectedFiles = [];
@@ -1637,7 +1683,7 @@
 
   // ── Generate ──────────────────────────────────────────────────────────────
   btnGenerate.addEventListener('click', async () => {
-    if (currentMode === 'batch') { startBatch(); return; }
+    if (currentMode === 'batch') { openScanModalOrStart(); return; }
 
     if (selectedFiles.length === 0 || selectedShots.size === 0) return;
 
@@ -1878,6 +1924,105 @@
 
   // Track last batch params for resume
   let lastBatchParams = null;
+  let pendingSkipFolders = []; // subfolder names user unchecked before starting
+
+  // ═══ Pre-run folder scan modal ════════════════════════════════════════════
+  const scanModal      = document.getElementById('scan-modal');
+  const scanModalBody  = document.getElementById('scan-modal-body');
+  const scanModalClose = document.getElementById('scan-modal-close');
+  const scanModalCancel = document.getElementById('scan-modal-cancel');
+  const scanModalStart = document.getElementById('scan-modal-start');
+  const scanModalAll   = document.getElementById('scan-modal-all');
+  const scanModalNone  = document.getElementById('scan-modal-none');
+
+  async function openScanModalOrStart() {
+    const folderPath = folderPathInput.value.trim().replace(/^['"]|['"]$/g, '');
+    if (!folderPath || selectedShots.size === 0) return;
+
+    // Fetch subfolder list
+    scanModalBody.innerHTML = '<div class="scan-empty">Scanning…</div>';
+    scanModal.classList.add('visible');
+    scanModalStart.disabled = true;
+
+    try {
+      const res = await fetch(`/scan-folder?folderPath=${encodeURIComponent(folderPath)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Scan failed');
+      renderScanList(data.subfolders || []);
+    } catch (err) {
+      scanModalBody.innerHTML = `<div class="scan-empty">Failed to scan: ${err.message}</div>`;
+      scanModalStart.disabled = true;
+    }
+  }
+
+  function renderScanList(subfolders) {
+    scanModalBody.innerHTML = '';
+    if (subfolders.length === 0) {
+      scanModalBody.innerHTML = '<div class="scan-empty">No subfolders found in that path.</div>';
+      scanModalStart.disabled = true;
+      return;
+    }
+    const list = document.createElement('div');
+    list.className = 'scan-list';
+    subfolders.forEach(sf => {
+      const row = document.createElement('label');
+      row.className = 'scan-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = true;
+      cb.value = sf.name;
+      cb.addEventListener('change', () => {
+        row.classList.toggle('disabled', !cb.checked);
+        updateScanStartState();
+      });
+      const name = document.createElement('span');
+      name.className = 'scan-item-name';
+      name.textContent = sf.name;
+      const count = document.createElement('span');
+      count.className = 'scan-item-count';
+      count.textContent = `${sf.imageCount} image${sf.imageCount === 1 ? '' : 's'}`;
+      row.append(cb, name, count);
+      list.appendChild(row);
+    });
+    scanModalBody.appendChild(list);
+    updateScanStartState();
+  }
+
+  function getScanCheckboxes() {
+    return [...scanModalBody.querySelectorAll('input[type="checkbox"]')];
+  }
+
+  function updateScanStartState() {
+    const checked = getScanCheckboxes().filter(cb => cb.checked).length;
+    scanModalStart.disabled = checked === 0;
+    scanModalStart.textContent = checked === 0 ? 'Start batch' : `Start batch (${checked})`;
+  }
+
+  scanModalAll.addEventListener('click', () => {
+    getScanCheckboxes().forEach(cb => {
+      cb.checked = true;
+      cb.closest('.scan-item')?.classList.remove('disabled');
+    });
+    updateScanStartState();
+  });
+  scanModalNone.addEventListener('click', () => {
+    getScanCheckboxes().forEach(cb => {
+      cb.checked = false;
+      cb.closest('.scan-item')?.classList.add('disabled');
+    });
+    updateScanStartState();
+  });
+  scanModalClose.addEventListener('click', () => scanModal.classList.remove('visible'));
+  scanModalCancel.addEventListener('click', () => scanModal.classList.remove('visible'));
+  scanModal.addEventListener('click', (e) => {
+    if (e.target === scanModal) scanModal.classList.remove('visible');
+  });
+  scanModalStart.addEventListener('click', () => {
+    const boxes = getScanCheckboxes();
+    pendingSkipFolders = boxes.filter(cb => !cb.checked).map(cb => cb.value);
+    scanModal.classList.remove('visible');
+    startBatch(false);
+  });
 
   btnCancelBatch.addEventListener('click', async () => {
     btnCancelBatch.textContent = 'Cancelling...';
@@ -1899,8 +2044,8 @@
     // Record folder in recents
     if (!isResume && typeof pushRecentFolder === 'function') pushRecentFolder(folderPath);
 
-    // Save batch params for resume
-    lastBatchParams = { folderPath, customInstruction, shots: [...selectedShots], provider: selectedProvider };
+    // Save batch params for resume (include current skip list)
+    lastBatchParams = { folderPath, customInstruction, shots: [...selectedShots], provider: selectedProvider, skipFolders: [...pendingSkipFolders] };
 
     if (!isResume) {
       logEntries.innerHTML = '';
@@ -1926,6 +2071,7 @@
     if (customInstruction) url += `&customInstruction=${encodeURIComponent(customInstruction)}`;
     if (autoMatchRingCheckbox.checked) url += '&autoMatchRing=1';
     if (isResume) url += '&resume=1';
+    if (pendingSkipFolders.length > 0) url += `&skipFolders=${encodeURIComponent(JSON.stringify(pendingSkipFolders))}`;
     const src = new EventSource(url);
 
     src.onmessage = (e) => {
@@ -1969,6 +2115,28 @@
 
       } else if (msg.type === 'product_done') {
         addLog(msg.skipped ? `  Skipped (complete)` : `  Done`, 'ok');
+        // Hide Skip button on normal completion
+        const sec = findProductSection(msg.product);
+        if (sec && sec._skipBtn) sec._skipBtn.style.display = 'none';
+
+      } else if (msg.type === 'product_skipped') {
+        addLog(`  \u2298 Skipped: ${msg.reason || 'user'}`, 'err');
+        const sec = findProductSection(msg.product);
+        if (sec) {
+          sec.classList.add('skipped');
+          // Mark any queued placeholders as skipped (remove spinners)
+          sec.querySelectorAll('.batch-angle-pending.queued').forEach(ph => {
+            ph.classList.remove('queued');
+            const spn = ph.querySelector('.mini-spinner');
+            if (spn) spn.remove();
+            const lbl = ph.querySelector('span');
+            if (lbl) lbl.textContent = `${lbl.textContent} (skipped)`;
+          });
+          if (sec._skipBtn) {
+            sec._skipBtn.disabled = true;
+            sec._skipBtn.textContent = 'Skipped';
+          }
+        }
 
       } else if (msg.type === 'cancelled') {
         addLog(`\n${msg.message}`, 'err');
@@ -2050,7 +2218,36 @@
     dlFolderBtn.textContent = 'Download folder';
     dlFolderBtn.addEventListener('click', () => downloadProductFolder(productName, dlFolderBtn));
 
-    titleEl.append(titleText, retryAllBtn, fixAllBtn, dlFolderBtn);
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'btn-retry btn-retry-product btn-skip-product';
+    skipBtn.textContent = 'Skip';
+    skipBtn.title = 'Stop generating remaining shots for this product';
+    skipBtn.addEventListener('click', async () => {
+      if (!confirm(`Skip the rest of ${productName}? Any in-flight shots will still finish, but no new shots will start.`)) return;
+      skipBtn.disabled = true;
+      skipBtn.textContent = 'Skipping…';
+      try {
+        const res = await fetch('/batch/skip-product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product: productName }),
+        });
+        const data = await res.json();
+        if (!data.skipped) {
+          skipBtn.disabled = false;
+          skipBtn.textContent = 'Skip';
+          addLog(`Could not skip ${productName}: ${data.message || 'no active batch'}`, 'err');
+        }
+      } catch (err) {
+        skipBtn.disabled = false;
+        skipBtn.textContent = 'Skip';
+        addLog(`Skip request failed: ${err.message}`, 'err');
+      }
+    });
+    section.dataset.product = productName;
+    section._skipBtn = skipBtn;
+
+    titleEl.append(titleText, retryAllBtn, fixAllBtn, dlFolderBtn, skipBtn);
 
     const grid = document.createElement('div');
     grid.className = 'batch-angles-grid';
@@ -2072,6 +2269,12 @@
     section.append(titleEl, grid);
     batchResultsEl.appendChild(section);
     batchResultsEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  function findProductSection(productName) {
+    return [...document.querySelectorAll('.batch-product-section')].find(
+      s => s.dataset.product === productName
+    );
   }
 
   function activateBatchPlaceholder(productName, angleId) {
@@ -2678,6 +2881,7 @@
     // Esc → close modals / menus
     if (e.key === 'Escape') {
       promptModal.classList.remove('visible');
+      scanModal.classList.remove('visible');
       if (recentMenu) recentMenu.classList.remove('visible');
       return;
     }

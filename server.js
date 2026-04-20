@@ -521,6 +521,7 @@ app.get('/file', (req, res) => {
 // ── Batch cancellation state ────────────────────────────────────────────────
 let activeBatchId  = null;
 let batchCancelled = false;
+let skipProducts   = new Set();   // product names to skip mid-run
 
 const cancelHandler = (req, res) => {
     if (activeBatchId) {
@@ -532,6 +533,40 @@ const cancelHandler = (req, res) => {
 };
 app.post('/cancel-batch', cancelHandler);
 app.post('/batch/cancel', cancelHandler);
+
+// Mid-run: skip a single in-flight/queued product
+app.post('/batch/skip-product', express.json(), (req, res) => {
+    const name = (req.body && req.body.product) || '';
+    if (!name) return res.status(400).json({ error: 'Missing product name.' });
+    if (!activeBatchId) return res.json({ skipped: false, message: 'No active batch.' });
+    skipProducts.add(name);
+    res.json({ skipped: true, product: name });
+});
+
+// Pre-run: list subfolders with image counts so the user can choose which to process
+app.get('/scan-folder', (req, res) => {
+    const folderPath = (req.query.folderPath || '').trim().replace(/^['"]|['"]$/g, '');
+    if (!folderPath) return res.status(400).json({ error: 'No folder path provided.' });
+    if (!fs.existsSync(folderPath)) return res.status(404).json({ error: `Folder not found: ${folderPath}` });
+    if (!fs.statSync(folderPath).isDirectory()) return res.status(400).json({ error: 'That path is a file, not a folder.' });
+
+    const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+    try {
+        const dirs = fs.readdirSync(folderPath, { withFileTypes: true })
+            .filter(d => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'ecommerce' && d.name !== 'output')
+            .map(d => {
+                const full = path.join(folderPath, d.name);
+                let imageCount = 0;
+                try {
+                    imageCount = fs.readdirSync(full).filter(f => IMAGE_EXTS.test(f) && !f.startsWith('.')).length;
+                } catch (e) {}
+                return { name: d.name, imageCount };
+            });
+        res.json({ folderPath, subfolders: dirs });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // ── Single product generation ───────────────────────────────────────────────
 app.post('/generate', upload.array('images[]', 10), async (req, res) => {
@@ -672,23 +707,38 @@ app.get('/batch', async (req, res) => {
     const provider          = (req.query.provider || 'gemini').trim();
     const resume            = req.query.resume === '1';
     const autoMatchRing     = req.query.autoMatchRing === '1';
+    // Pre-run skip list: JSON array of subfolder names the user unchecked
+    let skipFolders = [];
+    try { skipFolders = JSON.parse(req.query.skipFolders || '[]'); } catch (e) { skipFolders = []; }
+    const skipFoldersSet = new Set(skipFolders);
 
     if (!folderPath) { send({ type: 'error', message: 'No folder path provided.' }); return res.end(); }
     if (!fs.existsSync(folderPath)) { send({ type: 'error', message: `Folder not found: ${folderPath}` }); return res.end(); }
     if (!fs.statSync(folderPath).isDirectory()) { send({ type: 'error', message: 'That path is a file, not a folder.' }); return res.end(); }
     if (shotIds.length === 0) { send({ type: 'error', message: 'No shots selected.' }); return res.end(); }
 
-    const productDirs = fs.readdirSync(folderPath, { withFileTypes: true })
+    const allDirs = fs.readdirSync(folderPath, { withFileTypes: true })
         .filter(d => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'ecommerce' && d.name !== 'output')
         .map(d => ({ name: d.name, fullPath: path.join(folderPath, d.name) }));
 
-    if (productDirs.length === 0) {
+    const productDirs = allDirs.filter(d => !skipFoldersSet.has(d.name));
+    const excludedCount = allDirs.length - productDirs.length;
+
+    if (allDirs.length === 0) {
         send({ type: 'error', message: 'No product subfolders found.' });
+        return res.end();
+    }
+    if (productDirs.length === 0) {
+        send({ type: 'error', message: 'All subfolders were excluded — nothing to process.' });
         return res.end();
     }
 
     activeBatchId = Date.now().toString();
     batchCancelled = false;
+    skipProducts = new Set();
+    if (excludedCount > 0) {
+        console.log(`[Batch] Excluding ${excludedCount} folder(s): ${skipFolders.join(', ')}`);
+    }
 
     const PRODUCT_CONCURRENCY = Math.max(1, parseInt(process.env.PRODUCT_CONCURRENCY || '2', 10));
     send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds, resume, productConcurrency: PRODUCT_CONCURRENCY });
@@ -697,6 +747,11 @@ app.get('/batch', async (req, res) => {
     // Process a single product (extracted so we can run N in parallel)
     async function processProduct(productName, productFolder) {
         if (clientDisconnected || batchCancelled) return;
+        if (skipProducts.has(productName)) {
+            send({ type: 'product_skipped', product: productName, reason: 'User skipped before start' });
+            console.log(`[Product] ⊘ Skipped (pre-start): ${productName}`);
+            return;
+        }
 
         send({ type: 'product_start', product: productName, productFolder });
         console.log(`\n[Product] ▶ ${productName}`);
@@ -781,6 +836,11 @@ app.get('/batch', async (req, res) => {
                 send({ type: 'product_done', product: productName });
                 return;
             }
+            if (skipProducts.has(productName)) {
+                send({ type: 'product_skipped', product: productName, reason: 'User skipped after anchor' });
+                console.log(`[Product] ⊘ Skipped (after anchor): ${productName}`);
+                return;
+            }
 
             // All remaining shots get the anchor reference
             const remaining = shotIds.filter(id => id !== anchorId);
@@ -849,6 +909,7 @@ app.get('/batch', async (req, res) => {
     const wasCancelled = batchCancelled;
     activeBatchId = null;
     batchCancelled = false;
+    skipProducts = new Set();
 
     if (!wasCancelled && !clientDisconnected) {
         send({ type: 'done' });
