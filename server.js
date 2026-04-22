@@ -41,11 +41,19 @@ if (geminiClient) PROVIDERS.nanobana2 = { label: 'Nano Banana 2',   canGenerate:
 console.log('[Providers]', Object.keys(PROVIDERS).join(', ') || 'NONE — add API keys to .env');
 
 // ── Cost tracking ─────────────────────────────────────────────────────────
-const COST_PER_IMAGE = {
+const COST_PER_IMAGE_BASE = {
     gemini:    0.134,   // Nano Banana Pro @ 1K
     nanobana2: 0.101,   // Nano Banana 2 @ 2K
     openai:    0.133,   // GPT Image 1.5 High @ 1024x1024
 };
+// Resolution-aware cost: draft costs ~50% less
+function getCostPerImage(provider, resolution = 'standard') {
+    const base = COST_PER_IMAGE_BASE[provider] || 0;
+    if (resolution === 'draft') return base * 0.5;
+    return base;
+}
+// Keep COST_PER_IMAGE as a static reference for backward compat (standard resolution)
+const COST_PER_IMAGE = COST_PER_IMAGE_BASE;
 
 const usageStats = {
     session: {
@@ -57,8 +65,8 @@ const usageStats = {
     history: [],  // last 50 entries
 };
 
-function trackUsage(provider, shotId) {
-    const cost = COST_PER_IMAGE[provider] || 0;
+function trackUsage(provider, shotId, resolution = 'standard') {
+    const cost = getCostPerImage(provider, resolution);
     if (!usageStats.session[provider]) usageStats.session[provider] = { images: 0, cost: 0 };
     usageStats.session[provider].images++;
     usageStats.session[provider].cost += cost;
@@ -75,6 +83,7 @@ function trackUsage(provider, shotId) {
     if (usageStats.history.length > 50) usageStats.history.length = 50;
 
     console.log(`[Cost] +$${cost.toFixed(3)} (${provider}/${shotId}) — session total: $${usageStats.session.total.cost.toFixed(3)} (${usageStats.session.total.images} images)`);
+    debounceSaveUsageStats();
     return entry;
 }
 
@@ -86,6 +95,7 @@ const CACHE_DIR        = path.join(__dirname, '.cache');
 const OUTPUT_CACHE_DIR = path.join(CACHE_DIR, 'outputs');
 const JPEG_CACHE_DIR   = path.join(CACHE_DIR, 'jpeg');
 const AUDIT_LOG_PATH   = path.join(__dirname, 'audit.log');
+const USAGE_STATS_PATH = path.join(CACHE_DIR, 'usage-stats.json');
 fs.mkdirSync(OUTPUT_CACHE_DIR, { recursive: true });
 fs.mkdirSync(JPEG_CACHE_DIR,   { recursive: true });
 
@@ -319,7 +329,7 @@ const SHOT_CATALOG = {
 
 // ── Prompt builders per shot ───────────────────────────────────────────────
 function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false, multiPiece = false) {
-    const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.';
+    const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.\n\nPHYSICAL SCALE IS SACRED: the reference photo represents the piece at its TRUE real-world size. When the piece is shown against a body (wrist, hand, neck, ear, finger) or a prop, it MUST maintain realistic proportions against adult human anatomy. Do NOT enlarge the piece "to make it look impressive," do NOT shrink it "to fit the composition." A bangle fits barely over the knuckles. A pendant is 1–3 cm across, not a medallion. A ring covers one knuckle segment. If the reference already shows the piece worn, measure it against the anatomy in the reference and reproduce that exact ratio.';
 
     // Only when the user has flagged that the folder contains multiple distinct pieces.
     // Without this flag we assume one piece per folder (the default, and how most users organise).
@@ -370,54 +380,105 @@ CAMERA: 85mm, f/4, with the jewelry in sharp focus and the reference object in s
 
         model_wrist: `SCENE: The jewelry is worn on the wrist/hand of a model. For bangles and bracelets: worn snugly on the wrist, sitting flush against skin with the outer decorative face toward the camera. For rings: worn on the ring finger, hand relaxed.
 
+PROPORTION & SCALE — CRITICAL, DO NOT GET THIS WRONG:
+The reference photo shows the TRUE physical size of this piece. You MUST preserve that scale against the model's anatomy. Anchor measurements for an adult woman's hand (use these as ground truth):
+- Wrist circumference: ~15–17 cm (inner diameter of a bangle that fits = roughly 58–65 mm across).
+- Back-of-hand width (knuckles): ~8 cm.
+- Ring finger width at base: ~15–17 mm.
+- Palm length (wrist crease to middle-finger base): ~10 cm.
+
+Rules:
+1. A standard bangle fits ONLY over the knuckles — its inner diameter is barely larger than the widest part of the hand. It should NOT look like a giant hoop dwarfing the wrist, and it should NOT look like a tiny ring strangling the wrist. Inner diameter must read as ~60 mm against a ~8 cm knuckle width — i.e. the bangle opening is about 3/4 the width of the knuckles when seen straight-on.
+2. A cuff bracelet's width (top-to-bottom face height) is typically 10–30 mm. It covers a fraction of the wrist, not the entire forearm. Do NOT stretch it into a gauntlet.
+3. A tennis/chain bracelet sits loose on the wrist with a small gap — do not inflate its links.
+4. A ring covers ~15–20 mm of finger length at most. It should not cover two finger segments unless the reference shows that.
+5. Metal thickness, stone size, and engraving depth must match the reference at 1:1 — do NOT thicken the profile "to make it pop."
+6. If the reference photo includes a hand for scale, measure the piece against the fingers/wrist in the reference and reproduce the exact ratio.
+
 FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the body, how much it slides or grips, the gap between jewelry and skin, the way it drapes or hangs under gravity. A loose bangle must look loose; a snug cuff must look snug. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, natural skin texture, clean manicure with nude or soft pink nails
+- Adult proportions — normal-sized hand, not an oversized or undersized hand
 - Arm extended forward, elbow slightly bent
 - Wrist level or slightly lowered, fingers pointing DOWNWARD and loosely relaxed
 - Back of hand faces the camera, palm faces away
 - Do NOT raise the hand with fingers pointing up, do NOT show the palm
 
-FRAMING: Tight crop showing only the hand, wrist, and a few inches of forearm. No face, no shoulder, no torso.
+FRAMING: Tight crop showing only the hand, wrist, and a few inches of forearm. No face, no shoulder, no torso. Do NOT zoom in so tight that the piece fills the frame and loses anatomical context — keep the whole hand visible so scale is readable.
 LIGHTING: Single soft key light from above-left, warm neutral blurred backdrop (creamy beige or soft gold), 85mm f/1.4 equivalent depth of field. Subtle film grain. The skin should glow warmly.`,
 
         model_neck: `SCENE: The jewelry is worn around the neck of a model. The necklace or choker sits naturally on the collarbone/décolletage area.
+
+PROPORTION & SCALE — CRITICAL, DO NOT GET THIS WRONG:
+Anchor measurements for an adult woman's neck/décolletage (ground truth):
+- Neck circumference: ~32–36 cm.
+- Collarbone-to-collarbone span (suprasternal notch width): ~14–17 cm.
+- Vertical distance from jaw to collarbone: ~10–12 cm.
+- Chin-to-sternum: ~18–22 cm.
+
+Rules:
+1. A CHOKER (38–42 cm) sits on the mid-neck with no gap.
+2. A PRINCESS necklace (44–48 cm) rests on the collarbones.
+3. A MATINEE (55–60 cm) hangs to mid-chest.
+4. A pendant diameter of 2 cm should read roughly 1/8 of the collarbone-to-collarbone span — do NOT inflate pendants to fill the chest.
+5. Chain link gauge and pendant stone sizes must match the reference 1:1. Do NOT thicken chains or enlarge stones.
+6. If the reference shows the piece worn, match that drape length and fit exactly.
 
 FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the neck, the drape length, the gap between the piece and skin, whether it sits high on the throat or low on the collarbone. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, natural skin, elegant bone structure
+- Adult proportions — normal-sized neck and shoulders, not elongated or miniaturized
 - Head tilted very slightly to one side, chin slightly lifted
 - Wearing a simple, solid-color top or bare shoulders (nothing competing with the jewelry)
 - Hair pulled back or swept to one side to fully reveal the necklace
 
-FRAMING: From mid-chest to just below the chin. The necklace is the clear focal point. Jawline and neck visible for context but the jewelry dominates.
+FRAMING: From mid-chest to just below the chin. The necklace is the clear focal point. Jawline and neck visible for context but the jewelry dominates. Keep enough anatomy visible for scale to read correctly.
 LIGHTING: Soft, warm key light from above-right, gentle fill from the left. Warm neutral backdrop. 85mm f/1.8, shallow depth. The skin glows, the metal catches light beautifully.`,
 
         model_ear: `SCENE: The earring is worn on the ear of a model. Close-up of the ear, jawline, and a hint of neck.
+
+PROPORTION & SCALE — CRITICAL, DO NOT GET THIS WRONG:
+Anchor measurements for an adult woman's ear (ground truth):
+- Ear total height (top of helix to bottom of lobe): ~6–6.5 cm.
+- Earlobe height: ~1.5–2 cm.
+- Earlobe width: ~1–1.5 cm.
+- Ear-to-jawline vertical distance: ~5–7 cm.
+
+Rules:
+1. A small STUD is 5–8 mm — it occupies only the centre of the earlobe, not the whole lobe.
+2. A MID-DROP earring (hoops, small jhumkas) is 20–30 mm total drop — bottom sits roughly level with the earlobe or just below.
+3. A LONG CHANDELIER / jhumka is 40–70 mm total drop — swings to the jawline, not past it unless the reference shows that.
+4. Stone diameters, pearl sizes and filigree thickness must match the reference 1:1. Do NOT scale the piece up to "fill" the ear.
+5. If the reference shows the earring worn, reproduce the exact drop length relative to the earlobe/jawline.
 
 FITTING: Study the reference photo(s) carefully. If the earring is shown being worn, replicate the EXACT fit — how it hangs, the drop length, whether it sits close to the lobe or dangles freely, and how it moves with gravity. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, clean skin, elegant jawline
+- Adult proportions — normal-sized ear and jaw, not oversized or undersized
 - Head turned slightly (three-quarter profile) to present the ear naturally
 - Hair tucked behind the ear or swept up to fully reveal the earring
 - Expression serene, mouth relaxed (if lips are visible at edge of frame)
 
-FRAMING: Tight crop on the ear and surrounding area. The earring is the clear hero. Show enough of the jaw and neck for anatomical context.
+FRAMING: Tight crop on the ear and surrounding area. The earring is the clear hero. Show enough of the jaw and neck for anatomical context so the viewer can read the earring's real-world size.
 LIGHTING: Soft key light from the front-left, gentle rim light to separate from background. Warm blurred backdrop. 100mm f/2, very shallow depth — the earring is razor-sharp, everything else falls off softly.`,
 
         model_lifestyle: `SCENE: Lifestyle editorial shot. The model is wearing the jewelry in a warm, luxurious setting — think golden hour light, soft furnishings, or a beautiful window. The mood is aspirational, elegant, and distinctly South Asian-luxe.
+
+PROPORTION & SCALE — CRITICAL, DO NOT GET THIS WRONG:
+At a medium framing distance the jewelry should read as a natural-sized piece against adult anatomy, NOT as an enlarged hero element. Use the same anchor measurements as for model_wrist / model_neck / model_ear (bangle ~60 mm inner diameter; princess necklace 44–48 cm; long earring drop 40–70 mm). The piece appears smaller in this wider frame than in close-ups — do NOT zoom or inflate it to compensate. Stone sizes, chain gauges, and metal thickness must match the reference 1:1.
 
 FITTING: Study the reference photo(s) carefully. If the jewelry is shown being worn, replicate the EXACT fit — how loose or tight it sits on the body, the drape, the gap between jewelry and skin, the way it hangs under gravity. Match the reference fit precisely.
 
 MODEL & POSE:
 - Woman in her early 20s, warm South Asian skin tone, styled beautifully but not overly made up
+- Adult proportions throughout — no elongated neck, oversized hands, or miniaturised torso
 - Natural, candid-feeling pose — adjusting the jewelry, looking away from camera, or mid-movement
 - Wearing complementary but simple clothing that doesn't compete (solid colors, elegant draping)
 
-FRAMING: Medium shot (waist up or three-quarter). The jewelry should be clearly visible and prominent despite the wider framing. Environmental context adds mood without overwhelming.
+FRAMING: Medium shot (waist up or three-quarter). The jewelry should be clearly visible and prominent despite the wider framing, but sized correctly for the distance — NOT enlarged to fake prominence.
 LIGHTING: Warm, natural-feeling light (golden hour or large window). Slight haze or warmth in the atmosphere. 50mm f/1.8, cinematic depth of field. Slight film grain for editorial feel.`,
 
         marble: `SCENE: Luxury surface shot. The jewelry rests on a white or cream Carrara marble surface with soft, natural grey veining. Beside the jewelry (not touching): one or two minimal props — a small sprig of dried flowers, a fragment of silk ribbon, or a tiny gold-rimmed dish. Props are muted and secondary. The composition is editorial, airy, and luxurious.
@@ -489,9 +550,24 @@ app.post('/usage/reset', (_req, res) => {
         usageStats.session[key] = { images: 0, cost: 0 };
     }
     usageStats.history = [];
+    try { fs.writeFileSync(USAGE_STATS_PATH, JSON.stringify(usageStats, null, 2)); } catch (e) {}
     res.json({ reset: true });
 });
 app.get('/cost-rates', (_req, res) => res.json(COST_PER_IMAGE));
+
+// ── Concurrency control (#18) ─────────────────────────────────────────────
+app.get('/concurrency', (_req, res) => {
+    res.json({ maxConcurrent: MAX_CONCURRENT, productConcurrency: PRODUCT_CONCURRENCY });
+});
+app.post('/concurrency', (req, res) => {
+    if (req.body.maxConcurrent !== undefined) {
+        MAX_CONCURRENT = Math.max(1, Math.min(6, parseInt(req.body.maxConcurrent, 10) || MAX_CONCURRENT));
+    }
+    if (req.body.productConcurrency !== undefined) {
+        PRODUCT_CONCURRENCY = Math.max(1, Math.min(6, parseInt(req.body.productConcurrency, 10) || PRODUCT_CONCURRENCY));
+    }
+    res.json({ maxConcurrent: MAX_CONCURRENT, productConcurrency: PRODUCT_CONCURRENCY });
+});
 
 // ── Scrape product images from URL ─────────────────────────────────────────
 app.post('/scrape-url', async (req, res) => {
@@ -547,14 +623,80 @@ app.get('/file', (req, res) => {
     res.sendFile(path.resolve(filePath));
 });
 
+// Return the first reference image from a product folder (largest = best ref)
+app.get('/product/reference', (req, res) => {
+    const folder = req.query.folder;
+    if (!folder || !fs.existsSync(folder)) return res.status(404).json({ error: 'Folder not found' });
+    try {
+        const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+        const files = fs.readdirSync(folder)
+            .filter(f => IMAGE_EXTS.test(f) && !f.startsWith('.'))
+            .map(f => {
+                const full = path.join(folder, f);
+                let size = 0;
+                try { size = fs.statSync(full).size; } catch (e) {}
+                return { full, size };
+            })
+            .sort((a, b) => b.size - a.size);
+        if (files.length === 0) return res.status(404).json({ error: 'No images' });
+        res.json({ path: files[0].full });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ── Batch cancellation state ────────────────────────────────────────────────
 let activeBatchId  = null;
 let batchCancelled = false;
 let skipProducts   = new Set();   // product names to skip mid-run
+let batchAbortController = null;  // aborts in-flight API calls & retry sleeps
+
+class CancelledError extends Error {
+    constructor() { super('CANCELLED'); this.name = 'CancelledError'; this.cancelled = true; }
+}
+function isCancelled(err) {
+    return err && (err.cancelled === true || err.name === 'CancelledError' || err.message === 'CANCELLED');
+}
+function throwIfCancelled() {
+    if (batchCancelled) throw new CancelledError();
+}
+// Race any promise against the current batch abort signal so cancel returns control instantly.
+function withCancel(promise) {
+    if (!batchAbortController) return promise;
+    const signal = batchAbortController.signal;
+    if (signal.aborted) return Promise.reject(new CancelledError());
+    return new Promise((resolve, reject) => {
+        const onAbort = () => reject(new CancelledError());
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+            v => { signal.removeEventListener('abort', onAbort); resolve(v); },
+            e => { signal.removeEventListener('abort', onAbort); reject(e); }
+        );
+    });
+}
+function abortableSleep(ms) {
+    return new Promise((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        if (batchAbortController) {
+            const signal = batchAbortController.signal;
+            const onAbort = () => { clearTimeout(t); reject(new CancelledError()); };
+            if (signal.aborted) return onAbort();
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
+    });
+}
 
 const cancelHandler = (req, res) => {
     if (activeBatchId) {
         batchCancelled = true;
+        if (batchAbortController) batchAbortController.abort();
+        // Flush the concurrency queue so pending acquires reject immediately
+        while (geminiQueue.length) {
+            const entry = geminiQueue.shift();
+            const rej = typeof entry === 'function' ? null : entry?.reject;
+            if (rej) rej(new CancelledError());
+        }
+        console.log('[Batch] ⚠ Cancel requested — aborting in-flight calls.');
         res.json({ cancelled: true });
     } else {
         res.json({ cancelled: false, message: 'No active batch.' });
@@ -604,6 +746,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     const shotIds           = JSON.parse(req.body.shots || '[]');
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
+    const resolution        = ['draft', 'standard', 'high'].includes(req.body.resolution) ? req.body.resolution : 'standard';
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
     const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
 
@@ -615,7 +758,7 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     }));
 
     try {
-        console.log(`[Generate] ${shotIds.length} shot(s) via ${provider}: ${shotIds.join(', ')}`);
+        console.log(`[Generate] ${shotIds.length} shot(s) via ${provider} @${resolution}: ${shotIds.join(', ')}`);
 
         // ── Anchor-first consistency pipeline ──
         // Always generate a clean hero/product shot first as the visual anchor.
@@ -634,9 +777,9 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
         // Generate anchor shot (no anchor reference for the anchor itself)
         console.log(`[Anchor] Generating ${anchorId} as consistency anchor via ${provider}...`);
         const anchorShot = SHOT_CATALOG[anchorId];
-        const anchorData = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
-        anchorRef = { base64: anchorData, mimeType: 'image/png' };
-        results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorData });
+        const anchorResult = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution);
+        anchorRef = { base64: anchorResult.base64, mimeType: 'image/png' };
+        results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorResult.base64, provider: anchorResult.provider });
 
         // Generate all remaining shots in parallel, ALL receiving the anchor
         const remaining = shotIds.filter(id => id !== anchorId);
@@ -646,8 +789,8 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
             const parallel = await Promise.all(remaining.map(async (shotId) => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return null;
-                const data = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing, multiPiece);
-                return { id: shotId, label: shot.label, category: shot.category, data };
+                const result = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing, multiPiece, resolution);
+                return { id: shotId, label: shot.label, category: shot.category, data: result.base64, provider: result.provider };
             }));
             results.push(...parallel.filter(Boolean));
         }
@@ -674,6 +817,7 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     const shotId            = req.body.angleId;
     const customInstruction = (req.body.customInstruction || '').trim() || null;
     const provider          = (req.body.provider || 'gemini').trim();
+    const resolution        = ['draft', 'standard', 'high'].includes(req.body.resolution) ? req.body.resolution : 'standard';
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
     const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
 
@@ -686,8 +830,8 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
         const shot = SHOT_CATALOG[shotId];
         if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
-        const imageData = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
-        res.json({ success: true, imageData, usage: usageStats });
+        const result = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution);
+        res.json({ success: true, imageData: result.base64, provider: result.provider, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
         res.status(500).json({ error: err.message || 'Generation failed.' });
@@ -736,6 +880,7 @@ app.get('/batch', async (req, res) => {
     const customInstruction = (req.query.customInstruction || '').trim() || null;
     const shotIds           = JSON.parse(req.query.shots || '[]');
     const provider          = (req.query.provider || 'gemini').trim();
+    const resolution        = ['draft', 'standard', 'high'].includes(req.query.resolution) ? req.query.resolution : 'standard';
     const resume            = req.query.resume === '1';
     const autoMatchRing     = req.query.autoMatchRing === '1';
     const multiPiece        = req.query.multiPiece === '1';
@@ -767,12 +912,12 @@ app.get('/batch', async (req, res) => {
 
     activeBatchId = Date.now().toString();
     batchCancelled = false;
+    batchAbortController = new AbortController();
     skipProducts = new Set();
     if (excludedCount > 0) {
         console.log(`[Batch] Excluding ${excludedCount} folder(s): ${skipFolders.join(', ')}`);
     }
 
-    const PRODUCT_CONCURRENCY = Math.max(1, parseInt(process.env.PRODUCT_CONCURRENCY || '2', 10));
     send({ type: 'start', total: productDirs.length, batchId: activeBatchId, shots: shotIds, resume, productConcurrency: PRODUCT_CONCURRENCY });
     console.log(`[Batch] Starting — ${productDirs.length} product(s), ${PRODUCT_CONCURRENCY} in parallel, shots: ${shotIds.join(', ')}`);
 
@@ -839,6 +984,7 @@ app.get('/batch', async (req, res) => {
                 || shotIds[0];
 
             let anchorRef = null;
+            let anchorGenerated = false;
             const anchorShot = SHOT_CATALOG[anchorId];
             const anchorOutPath = path.join(outDir, `${anchorId}.png`);
 
@@ -852,15 +998,20 @@ app.get('/batch', async (req, res) => {
                 send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
                 console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
                 try {
-                    const b64 = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece);
-                    anchorRef = { base64: b64, mimeType: 'image/png' };
-                    fs.writeFileSync(anchorOutPath, Buffer.from(b64, 'base64'));
-                    send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: anchorOutPath });
+                    const result = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution, !resume);
+                    anchorRef = { base64: result.base64, mimeType: 'image/png' };
+                    fs.writeFileSync(anchorOutPath, Buffer.from(result.base64, 'base64'));
+                    anchorGenerated = true;
+                    send({ type: 'angle_done', product: productName, angle: anchorId, label: anchorShot.label, savedTo: anchorOutPath, provider: result.provider });
                     send({ type: 'usage', usage: usageStats });
                     console.log(`  [Shot] ✓ ${anchorShot.label} → ${anchorOutPath}`);
                 } catch (err) {
-                    send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
-                    console.error(`  [Shot] ✗ ${anchorShot.label}: ${err.message}`);
+                    if (isCancelled(err) || batchCancelled) {
+                        console.log(`  [Shot] ⊘ Cancelled: ${anchorShot.label}`);
+                    } else {
+                        send({ type: 'angle_error', product: productName, angle: anchorId, message: err.message });
+                        console.error(`  [Shot] ✗ ${anchorShot.label}: ${err.message}`);
+                    }
                 }
             }
 
@@ -897,21 +1048,39 @@ app.get('/batch', async (req, res) => {
             const parallelTasks = toGenerate.map(shotId => {
                 const shot = SHOT_CATALOG[shotId];
                 if (!shot) return Promise.resolve();
-                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing, multiPiece)
-                    .then(b64 => {
+                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing, multiPiece, resolution, !resume)
+                    .then(result => {
                         const p = path.join(outDir, `${shotId}.png`);
-                        fs.writeFileSync(p, Buffer.from(b64, 'base64'));
-                        send({ type: 'angle_done', product: productName, angle: shotId, label: shot.label, savedTo: p });
+                        fs.writeFileSync(p, Buffer.from(result.base64, 'base64'));
+                        send({ type: 'angle_done', product: productName, angle: shotId, label: shot.label, savedTo: p, provider: result.provider });
                         send({ type: 'usage', usage: usageStats });
                         console.log(`  [Shot] ✓ ${shot.label} → ${p}`);
                     })
                     .catch(err => {
-                        send({ type: 'angle_error', product: productName, angle: shotId, message: err.message });
-                        console.error(`  [Shot] ✗ ${shot.label}: ${err.message}`);
+                        if (isCancelled(err) || batchCancelled) {
+                            console.log(`  [Shot] ⊘ Cancelled: ${shot.label}`);
+                        } else {
+                            send({ type: 'angle_error', product: productName, angle: shotId, message: err.message });
+                            console.error(`  [Shot] ✗ ${shot.label}: ${err.message}`);
+                        }
                     });
             });
 
             await Promise.all(parallelTasks);
+
+            // Per-product cost tracking: count successful shots for this product
+            let successfulShots = 0;
+            for (const sid of toGenerate) {
+                if (fs.existsSync(path.join(outDir, `${sid}.png`))) successfulShots++;
+            }
+            // Include anchor if it was generated this run (not resumed from disk)
+            if (anchorGenerated) successfulShots++;
+
+            const productCostRate = getCostPerImage(provider, resolution);
+            const productCost = successfulShots * productCostRate;
+            if (successfulShots > 0) {
+                send({ type: 'product_cost', product: productName, images: successfulShots, cost: parseFloat(productCost.toFixed(3)) });
+            }
         } catch (err) {
             console.error(`[Batch] ${productName}:`, err.message);
             send({ type: 'product_error', product: productName, message: err.message });
@@ -941,6 +1110,7 @@ app.get('/batch', async (req, res) => {
     const wasCancelled = batchCancelled;
     activeBatchId = null;
     batchCancelled = false;
+    batchAbortController = null;
     skipProducts = new Set();
 
     if (!wasCancelled && !clientDisconnected) {
@@ -992,8 +1162,9 @@ app.post('/prompt-preview', (req, res) => {
 
 // ── Batch retry single shot ─────────────────────────────────────────────────
 app.post('/retry-angle', upload.none(), async (req, res) => {
-    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr, multiPiece: rawMp } = req.body;
+    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr, multiPiece: rawMp, resolution: rawRes } = req.body;
     const provider = (retryProvider || 'gemini').trim();
+    const resolution = ['draft', 'standard', 'high'].includes(rawRes) ? rawRes : 'standard';
     const autoMatchRing = rawAmr === '1' || rawAmr === 1 || rawAmr === true;
     const multiPiece = rawMp === '1' || rawMp === 1 || rawMp === true;
     if (!productFolder || !angleId) return res.status(400).json({ error: 'Missing productFolder or angleId.' });
@@ -1028,11 +1199,11 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
-        const raw = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing, multiPiece);
+        const result = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing, multiPiece, resolution);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
-        fs.writeFileSync(outPath, Buffer.from(raw, 'base64'));
-        res.json({ success: true, base64: raw, usage: usageStats });
+        fs.writeFileSync(outPath, Buffer.from(result.base64, 'base64'));
+        res.json({ success: true, base64: result.base64, provider: result.provider, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
         res.status(500).json({ error: err.message || 'Retry failed.' });
@@ -1153,6 +1324,59 @@ app.post('/download-zip', async (req, res) => {
     res.send(zipBuf);
 });
 
+// ── Shopify export endpoint (#19) ─────────────────────────────────────────
+app.post('/shopify/upload', async (req, res) => {
+    const { productHandle, images, shopDomain, accessToken } = req.body || {};
+    const domain = shopDomain || process.env.SHOPIFY_DOMAIN;
+    const token = accessToken || process.env.SHOPIFY_ACCESS_TOKEN;
+
+    if (!domain || !token) {
+        return res.status(400).json({ error: 'Shopify credentials not configured' });
+    }
+    if (!productHandle) {
+        return res.status(400).json({ error: 'Missing productHandle' });
+    }
+    if (!images || !Array.isArray(images) || images.length === 0) {
+        return res.status(400).json({ error: 'No images provided' });
+    }
+
+    try {
+        // Fetch product ID by handle
+        const productRes = await fetch(
+            `https://${domain}/admin/api/2024-01/products.json?handle=${encodeURIComponent(productHandle)}`,
+            { headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' } }
+        );
+        if (!productRes.ok) {
+            return res.status(productRes.status).json({ error: `Shopify API error: ${productRes.status} ${productRes.statusText}` });
+        }
+        const productData = await productRes.json();
+        const product = productData.products?.[0];
+        if (!product) {
+            return res.status(404).json({ error: `Product not found with handle: ${productHandle}` });
+        }
+
+        // Upload each image
+        let uploaded = 0;
+        for (const img of images) {
+            const imgRes = await fetch(
+                `https://${domain}/admin/api/2024-01/products/${product.id}/images.json`,
+                {
+                    method: 'POST',
+                    headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: { attachment: img.data } }),
+                }
+            );
+            if (imgRes.ok) uploaded++;
+            else console.warn(`[Shopify] Failed to upload image ${img.name}: ${imgRes.status}`);
+        }
+
+        res.json({ success: true, uploaded });
+    } catch (err) {
+        console.error('[Shopify Error]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 function buildZip(entries) {
     const localHeaders = [];
     const centralHeaders = [];
@@ -1194,19 +1418,23 @@ function buildZip(entries) {
 }
 
 // ── Universal shot generator (multi-provider) ───────────────────────────────
-async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false, multiPiece = false) {
+async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false, multiPiece = false, resolution = 'standard', noCache = false) {
     const startedAt = Date.now();
     const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece);
     const isEcom   = shotId.startsWith('ecom_');
     const shotLabel = SHOT_CATALOG[shotId]?.label || shotId;
 
-    // 1. Cache hit? Skip the API call entirely.
+    // 1. Cache hit? Skip the API call entirely (unless caller opts out).
     const cacheKey = outputCacheKey(provider, shotId, prompt, imageInputs);
-    const cached = outputCacheGet(cacheKey);
-    if (cached) {
-        console.log(`[Cache] HIT ${shotId} (${provider}) — $0`);
-        audit({ shotId, provider, cache: true, durationMs: Date.now() - startedAt });
-        return cached;
+    if (!noCache) {
+        const cached = outputCacheGet(cacheKey);
+        if (cached) {
+            console.log(`[Cache] HIT ${shotId} (${provider}) — $0`);
+            audit({ shotId, provider, cache: true, durationMs: Date.now() - startedAt });
+            return { base64: cached, provider };
+        }
+    } else {
+        console.log(`[Cache] BYPASS ${shotId} (fresh batch)`);
     }
 
     // 2. Enforce daily budget cap if configured
@@ -1218,10 +1446,10 @@ async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = 
             ? `${prompt}\n\nQC FEEDBACK FROM PREVIOUS ATTEMPT — FIX THIS: ${extraInstruction}`
             : prompt;
         let raw;
-        if (p === 'openai')         raw = await generateWithOpenAI(effectivePrompt, imageInputs);
-        else if (p === 'nanobana2') raw = await generateWithNanoBana2(effectivePrompt, imageInputs);
+        if (p === 'openai')         raw = await generateWithOpenAI(effectivePrompt, imageInputs, resolution);
+        else if (p === 'nanobana2') raw = await generateWithNanoBana2(effectivePrompt, imageInputs, resolution);
         else                        raw = await generateWithGemini(effectivePrompt, imageInputs);
-        trackUsage(p, shotId);
+        trackUsage(p, shotId, resolution);
         return raw;
     };
 
@@ -1236,6 +1464,7 @@ async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = 
             if (i > 0) console.log(`[Fallback] ✓ Succeeded on ${p} after ${chain[0]} failed.`);
             break;
         } catch (err) {
+            if (isCancelled(err) || batchCancelled) throw new CancelledError();
             lastErr = err;
             if (i === chain.length - 1 || !isFallbackWorthy(err)) {
                 audit({ shotId, provider, ok: false, error: err.message, durationMs: Date.now() - startedAt });
@@ -1280,7 +1509,7 @@ async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = 
         qcRetried,
         durationMs: Date.now() - startedAt,
     });
-    return raw;
+    return { base64: raw, provider: usedProvider };
 }
 
 async function generateWithGemini(prompt, imageInputs) {
@@ -1292,29 +1521,35 @@ async function generateWithGemini(prompt, imageInputs) {
     return makeSquareBase64(raw);
 }
 
-async function generateWithOpenAI(prompt, imageInputs) {
+async function generateWithOpenAI(prompt, imageInputs, resolution = 'standard') {
+    const openaiResMap = { draft: '512x512', standard: '1024x1024', high: '1024x1024' };
+    const openaiQualMap = { draft: 'low', standard: 'high', high: 'high' };
+    const oaiSize = openaiResMap[resolution] || '1024x1024';
+    const oaiQuality = openaiQualMap[resolution] || 'high';
     await acquireGeminiSlot(); // reuse the same concurrency limiter
     try {
+        throwIfCancelled();
         // Use gpt-image-1.5 via the Images API with reference images
         const imageFiles = imageInputs.map((img, i) => {
             const buf = Buffer.from(img.base64, 'base64');
             return new File([buf], `ref_${i}.png`, { type: img.mimeType });
         });
 
-        console.log(`[OpenAI] calling gpt-image-1.5... (${imageFiles.length} reference image(s))`);
+        console.log(`[OpenAI] calling gpt-image-1.5... (${imageFiles.length} reference image(s), ${oaiSize} ${oaiQuality})`);
 
-        const response = await withTimeout(
+        const signal = batchAbortController?.signal;
+        const response = await withCancel(withTimeout(
             openaiClient.images.edit({
                 model: 'gpt-image-1.5',
                 image: imageFiles,
                 prompt: prompt,
                 n: 1,
-                size: '1024x1024',
-                quality: 'high',
-            }),
+                size: oaiSize,
+                quality: oaiQuality,
+            }, signal ? { signal } : undefined),
             API_TIMEOUT_MS,
             'OpenAI'
-        );
+        ));
 
         const b64 = response.data?.[0]?.b64_json;
         if (!b64) {
@@ -1333,17 +1568,19 @@ async function generateWithOpenAI(prompt, imageInputs) {
     }
 }
 
-async function generateWithNanoBana2(prompt, imageInputs) {
+async function generateWithNanoBana2(prompt, imageInputs, resolution = 'standard') {
+    const nanobanaResMap = { draft: '512', standard: '1K', high: '2K' };
+    const nanoImageSize = nanobanaResMap[resolution] || '1K';
     const parts = [
         { text: prompt },
         ...imageInputs.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.base64 } })),
     ];
-    const raw = await callNanoBana2(parts);
+    const raw = await callNanoBana2(parts, 0, nanoImageSize);
     return makeSquareBase64(raw);
 }
 
 // ── Timeout helper ────────────────────────────────────────────────────────
-const API_TIMEOUT_MS = 120000; // 2 minutes per API call
+const API_TIMEOUT_MS = 240000; // 4 minutes per API call (Gemini 3 Pro can be slow under load)
 
 function withTimeout(promise, ms, label = 'API call') {
     return Promise.race([
@@ -1375,34 +1612,40 @@ function retryCap(err) {
     return is429(err) ? QUOTA_MAX_RETRIES : MAX_RETRIES;
 }
 
-const MAX_CONCURRENT = 3;
+let MAX_CONCURRENT = 3;
+let PRODUCT_CONCURRENCY = Math.max(1, parseInt(process.env.PRODUCT_CONCURRENCY || '2', 10));
 let activeGeminiCalls = 0;
 const geminiQueue = [];
 
 function acquireGeminiSlot() {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
+        if (batchCancelled) return reject(new CancelledError());
         if (activeGeminiCalls < MAX_CONCURRENT) {
             activeGeminiCalls++;
             resolve();
         } else {
-            geminiQueue.push(resolve);
+            geminiQueue.push({ resolve, reject });
         }
     });
 }
 
 function releaseGeminiSlot() {
     activeGeminiCalls--;
-    if (geminiQueue.length > 0) {
+    while (geminiQueue.length > 0) {
+        const entry = geminiQueue.shift();
+        if (batchCancelled) { entry.reject(new CancelledError()); continue; }
         activeGeminiCalls++;
-        geminiQueue.shift()();
+        entry.resolve();
+        break;
     }
 }
 
 async function callGemini(parts, attempt = 0) {
     await acquireGeminiSlot();
     try {
+        throwIfCancelled();
         console.log(`[Gemini] calling... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
-        const response = await withTimeout(
+        const response = await withCancel(withTimeout(
             geminiClient.models.generateContent({
                 model: 'gemini-3-pro-image-preview',
                 contents: [{ role: 'user', parts }],
@@ -1410,7 +1653,7 @@ async function callGemini(parts, attempt = 0) {
             }),
             API_TIMEOUT_MS,
             'Gemini'
-        );
+        ));
 
         const resParts  = response.candidates?.[0]?.content?.parts || [];
         const imagePart = resParts.find(p => p.inlineData?.data && !p.thought);
@@ -1431,12 +1674,13 @@ async function callGemini(parts, attempt = 0) {
         console.log('[Gemini] image OK');
         return imagePart.inlineData.data;
     } catch (err) {
+        if (isCancelled(err) || batchCancelled) throw new CancelledError();
         const cap = retryCap(err);
         if (attempt < cap - 1) {
             const delay = retryDelay(err, attempt);
             const label = is429(err) ? 'quota-backoff' : 'retry';
             console.log(`[Gemini] ${label} ${attempt + 1}/${cap} in ${Math.round(delay / 1000)}s (${err?.message?.slice(0, 80) || ''})`);
-            await new Promise(r => setTimeout(r, delay));
+            await abortableSleep(delay);
             return callGemini(parts, attempt + 1);
         }
         throw err;
@@ -1445,11 +1689,12 @@ async function callGemini(parts, attempt = 0) {
     }
 }
 
-async function callNanoBana2(parts, attempt = 0) {
+async function callNanoBana2(parts, attempt = 0, imageSize = '2K') {
     await acquireGeminiSlot();
     try {
-        console.log(`[NanoBana2] calling gemini-3.1-flash-image-preview... (${parts.filter(p => p.inlineData).length} image(s))${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
-        const response = await withTimeout(
+        throwIfCancelled();
+        console.log(`[NanoBana2] calling gemini-3.1-flash-image-preview... (${parts.filter(p => p.inlineData).length} image(s), ${imageSize})${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
+        const response = await withCancel(withTimeout(
             geminiClient.models.generateContent({
                 model: 'gemini-3.1-flash-image-preview',
                 contents: [{ role: 'user', parts }],
@@ -1457,13 +1702,13 @@ async function callNanoBana2(parts, attempt = 0) {
                     responseModalities: ['TEXT', 'IMAGE'],
                     imageConfig: {
                         aspectRatio: '1:1',
-                        imageSize: '2K',
+                        imageSize: imageSize,
                     },
                 },
             }),
             API_TIMEOUT_MS,
             'NanoBana2'
-        );
+        ));
 
         const resParts  = response.candidates?.[0]?.content?.parts || [];
         const imagePart = resParts.find(p => p.inlineData?.data && !p.thought);
@@ -1484,13 +1729,14 @@ async function callNanoBana2(parts, attempt = 0) {
         console.log('[NanoBana2] image OK');
         return imagePart.inlineData.data;
     } catch (err) {
+        if (isCancelled(err) || batchCancelled) throw new CancelledError();
         const cap = retryCap(err);
         if (attempt < cap - 1) {
             const delay = retryDelay(err, attempt);
             const label = is429(err) ? 'quota-backoff' : 'retry';
             console.log(`[NanoBana2] ${label} ${attempt + 1}/${cap} in ${Math.round(delay / 1000)}s (${err?.message?.slice(0, 80) || ''})`);
-            await new Promise(r => setTimeout(r, delay));
-            return callNanoBana2(parts, attempt + 1);
+            await abortableSleep(delay);
+            return callNanoBana2(parts, attempt + 1, imageSize);
         }
         throw err;
     } finally {
@@ -1523,37 +1769,40 @@ async function toJpeg(filePathOrName, buffer) {
     if (cachedJpg) return cachedJpg;
 
     if (ext === '.heic' || ext === '.heif') {
-        // Try sips first (macOS native), then sharp as fallback
-        const tmpDir = path.join(__dirname, '.tmp');
-        fs.mkdirSync(tmpDir, { recursive: true });
-        const stamp  = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const tmpIn  = path.join(tmpDir, `heic-in-${stamp}.heic`);
-        const tmpOut = path.join(tmpDir, `heic-out-${stamp}.jpg`);
-        try {
-            fs.writeFileSync(tmpIn, buffer);
-            await withTimeout(
-                new Promise((resolve, reject) => {
-                    execFile('sips', ['-s', 'format', 'jpeg', tmpIn, '--out', tmpOut], err => err ? reject(err) : resolve());
-                }),
-                30000,
-                'HEIC conversion'
-            );
-            const out = fs.readFileSync(tmpOut);
-            jpegCachePut(bufHash, out);
-            return out;
-        } catch (sipsErr) {
-            console.warn(`[HEIC] sips failed (${sipsErr.message}), trying sharp...`);
+        // Try sips first (macOS native, only on darwin), then sharp as fallback
+        if (process.platform === 'darwin') {
+            const tmpDir = path.join(__dirname, '.tmp');
+            fs.mkdirSync(tmpDir, { recursive: true });
+            const stamp  = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const tmpIn  = path.join(tmpDir, `heic-in-${stamp}.heic`);
+            const tmpOut = path.join(tmpDir, `heic-out-${stamp}.jpg`);
             try {
-                const out = await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+                fs.writeFileSync(tmpIn, buffer);
+                await withTimeout(
+                    new Promise((resolve, reject) => {
+                        execFile('sips', ['-s', 'format', 'jpeg', tmpIn, '--out', tmpOut], err => err ? reject(err) : resolve());
+                    }),
+                    30000,
+                    'HEIC conversion'
+                );
+                const out = fs.readFileSync(tmpOut);
                 jpegCachePut(bufHash, out);
                 return out;
-            } catch (sharpErr) {
-                console.error(`[HEIC] sharp also failed (${sharpErr.message}), skipping file`);
-                throw new Error(`Cannot convert HEIC file: ${filePathOrName}`);
+            } catch (sipsErr) {
+                console.warn(`[HEIC] sips failed (${sipsErr.message}), trying sharp...`);
+            } finally {
+                if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
+                if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
             }
-        } finally {
-            if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
-            if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
+        }
+        // sharp fallback (all platforms, or after sips failure on macOS)
+        try {
+            const out = await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+            jpegCachePut(bufHash, out);
+            return out;
+        } catch (sharpErr) {
+            console.error(`[HEIC] sharp failed (${sharpErr.message}), skipping file`);
+            throw new Error(`Cannot convert HEIC file: ${filePathOrName}`);
         }
     }
     const out = await sharp(buffer).jpeg({ quality: 95 }).toBuffer();
@@ -1561,7 +1810,98 @@ async function toJpeg(filePathOrName, buffer) {
     return out;
 }
 
+// ── Cache eviction (#12) ──────────────────────────────────────────────────
+function evictCache() {
+    try {
+        const files = fs.readdirSync(OUTPUT_CACHE_DIR).map(f => {
+            const full = path.join(OUTPUT_CACHE_DIR, f);
+            try {
+                const stat = fs.statSync(full);
+                return { full, size: stat.size, mtimeMs: stat.mtimeMs };
+            } catch (e) { return null; }
+        }).filter(Boolean);
+
+        const now = Date.now();
+        const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+        const MAX_CACHE_BYTES = 500 * 1024 * 1024;
+
+        let evictedCount = 0;
+        let evictedBytes = 0;
+
+        // Pass 1: delete files older than 7 days
+        const remaining = [];
+        for (const f of files) {
+            if (now - f.mtimeMs > SEVEN_DAYS) {
+                try { fs.unlinkSync(f.full); evictedCount++; evictedBytes += f.size; } catch (e) {}
+            } else {
+                remaining.push(f);
+            }
+        }
+
+        // Pass 2: cap total size at 500MB, delete oldest first
+        remaining.sort((a, b) => a.mtimeMs - b.mtimeMs);
+        let totalSize = remaining.reduce((s, f) => s + f.size, 0);
+        while (totalSize > MAX_CACHE_BYTES && remaining.length > 0) {
+            const oldest = remaining.shift();
+            try { fs.unlinkSync(oldest.full); evictedCount++; evictedBytes += oldest.size; totalSize -= oldest.size; } catch (e) {}
+        }
+
+        if (evictedCount > 0) {
+            console.log(`[CacheEvict] Evicted ${evictedCount} file(s), ${(evictedBytes / 1024 / 1024).toFixed(1)}MB freed`);
+        }
+    } catch (e) {
+        console.warn('[CacheEvict] Error:', e.message);
+    }
+}
+
+// ── Audit log rotation (#13) ─────────────────────────────────────────────
+function rotateAuditLog() {
+    try {
+        if (!fs.existsSync(AUDIT_LOG_PATH)) return;
+        const stat = fs.statSync(AUDIT_LOG_PATH);
+        if (stat.size > 10 * 1024 * 1024) {
+            const rotatedPath = AUDIT_LOG_PATH + '.1';
+            fs.renameSync(AUDIT_LOG_PATH, rotatedPath);
+            fs.writeFileSync(AUDIT_LOG_PATH, '');
+            console.log(`[AuditRotate] Rotated audit.log (${(stat.size / 1024 / 1024).toFixed(1)}MB) → audit.log.1`);
+        }
+    } catch (e) {
+        console.warn('[AuditRotate] Error:', e.message);
+    }
+}
+
+// ── Persist usage stats (#14) ─────────────────────────────────────────────
+function loadUsageStats() {
+    try {
+        if (fs.existsSync(USAGE_STATS_PATH)) {
+            const saved = JSON.parse(fs.readFileSync(USAGE_STATS_PATH, 'utf8'));
+            if (saved.session) Object.assign(usageStats.session, saved.session);
+            if (saved.history) usageStats.history = saved.history;
+            console.log('[UsageStats] Loaded from disk');
+        }
+    } catch (e) {
+        console.warn('[UsageStats] Could not load:', e.message);
+    }
+}
+
+let _usageWriteTimer = null;
+function debounceSaveUsageStats() {
+    if (_usageWriteTimer) return;
+    _usageWriteTimer = setTimeout(() => {
+        _usageWriteTimer = null;
+        try {
+            fs.writeFileSync(USAGE_STATS_PATH, JSON.stringify(usageStats, null, 2));
+        } catch (e) { /* non-fatal */ }
+    }, 5000);
+}
+
 // ── Start ───────────────────────────────────────────────────────────────────
+// Run startup tasks
+rotateAuditLog();
+loadUsageStats();
+evictCache();
+setInterval(evictCache, 30 * 60 * 1000);
+
 const server = app.listen(PORT, () => console.log(`\nHouse of Mina Pipeline → http://localhost:${PORT}\n`));
 
 // Keep connections alive and prevent premature drops
