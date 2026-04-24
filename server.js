@@ -10,6 +10,7 @@ const { execFile } = require('child_process');
 const sharp        = require('sharp');
 const { GoogleGenAI } = require('@google/genai');
 const OpenAI       = require('openai');
+const { BRANDS, DEFAULT_BRAND, resolveBrand, listBrands } = require('./brands');
 
 process.on('uncaughtException', (err) => {
     console.error('[Uncaught Exception]', err.message, err.stack);
@@ -327,9 +328,41 @@ const SHOT_CATALOG = {
     },
 };
 
+// Parse overlay options from a request body. Honors brand default when the
+// client didn't explicitly send `overlayEnabled`. Returns null if the brand
+// doesn't support overlays (so generateShot short-circuits cheaply).
+function parseOverlayOpts(body, brandId) {
+    const brand = resolveBrand(brandId);
+    const cfg = brand.overlay;
+    if (!cfg || !cfg.supported) return null;
+    const raw = body && body.overlayEnabled;
+    let enabled;
+    if (raw === undefined || raw === null || raw === '') {
+        enabled = !!cfg.defaultEnabled;
+    } else {
+        enabled = raw === true || raw === '1' || raw === 1 || raw === 'true';
+    }
+    const weightText = (body && typeof body.weightText === 'string') ? body.weightText : '';
+    return { enabled, weightText };
+}
+
+// Brand-aware shot catalog. Merges the shared catalog with any extraShots the
+// active brand declares (e.g. Taheri's taheri_signature walnut-on-emerald shot).
+function buildShotCatalog(brandId = DEFAULT_BRAND) {
+    const brand = resolveBrand(brandId);
+    const merged = { ...SHOT_CATALOG };
+    for (const extra of brand.extraShots || []) {
+        // The scenePrompt lives in buildShotPrompt's scenes lookup; only meta here.
+        const { scenePrompt, ...meta } = extra;
+        merged[extra.id] = meta;
+    }
+    return merged;
+}
+
 // ── Prompt builders per shot ───────────────────────────────────────────────
-function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false, multiPiece = false) {
-    const base = 'You are generating product photography for House of Mina (houseofmina.store), a luxury South Asian jewelry brand. Their aesthetic is warm, elegant, and editorial — rich gold tones, deep jewel colors, and a regal yet modern sensibility.\n\nCopy the jewelry from the reference photo(s) with absolute fidelity. Reproduce every stone, every metal tone, every proportion, every surface texture exactly. Do not add, remove, merge, or alter any design element. The generated image must be indistinguishable from a real photograph of this exact piece.\n\nPHYSICAL SCALE IS SACRED: the reference photo represents the piece at its TRUE real-world size. When the piece is shown against a body (wrist, hand, neck, ear, finger) or a prop, it MUST maintain realistic proportions against adult human anatomy. Do NOT enlarge the piece "to make it look impressive," do NOT shrink it "to fit the composition." A bangle fits barely over the knuckles. A pendant is 1–3 cm across, not a medallion. A ring covers one knuckle segment. If the reference already shows the piece worn, measure it against the anatomy in the reference and reproduce that exact ratio.';
+function buildShotPrompt(shotId, customInstruction, hasAnchor = false, autoMatchRing = false, multiPiece = false, brandId = DEFAULT_BRAND) {
+    const brand = resolveBrand(brandId);
+    const base = brand.baseIntro;
 
     // Only when the user has flagged that the folder contains multiple distinct pieces.
     // Without this flag we assume one piece per folder (the default, and how most users organise).
@@ -365,7 +398,7 @@ CAMERA: Dedicated macro lens at 1:1 magnification, f/5.6 for shallow depth, ring
         ecom_flat: `SCENE: Overhead flat lay on pure white (#FFFFFF) surface and background. Camera directly above (90° bird's eye). The jewelry is laid flat, centered, with its decorative face pointing up. For bangles/bracelets: circular shape fully visible. For necklaces: arranged in an elegant drape or gentle curve. For rings: face up, slightly angled. Even, shadowless lighting from a large overhead softbox. Clean, minimal, editorial.
 CAMERA: 85mm, f/8, tripod-mounted directly overhead. Perfect symmetry in composition.`,
 
-        ecom_stand: `SCENE: House of Mina brand display presentation. Look at the reference photo(s) to determine the jewelry type, then choose the CORRECT display:
+        ecom_stand: `SCENE: ${brand.ecomStandBrandRef}. Look at the reference photo(s) to determine the jewelry type, then choose the CORRECT display:
 - Bangles / cuffs / bracelets: upright on a velvet cushion roll or half-cylinder stand, resting naturally with the decorative face toward camera. NEVER use a T-bar or hanging stand for bangles.
 - Rings: on a slim velvet cone or small cushion, tilted slightly toward camera.
 - Necklaces / chokers: draped over a fabric neck bust or laid on a velvet tray in an elegant curve.
@@ -490,6 +523,11 @@ LIGHTING: Single focused light source from above-right, creating dramatic highli
 CAMERA: Low angle (15–20°), 100mm f/2.8, shallow depth. Cinematic, editorial, powerful. Think luxury brand campaign.`,
     };
 
+    // Merge in brand-specific extra shots (e.g. Taheri's taheri_signature).
+    for (const extra of brand.extraShots || []) {
+        if (extra.scenePrompt) scenes[extra.id] = extra.scenePrompt;
+    }
+
     const scene = scenes[shotId] || scenes.ecom_hero;
 
     const ringMatchBlock = autoMatchRing
@@ -543,7 +581,11 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 // ── Serve available providers + shot catalog to frontend ────────────────────
 app.get('/providers', (_req, res) => res.json(PROVIDERS));
-app.get('/shots', (_req, res) => res.json(SHOT_CATALOG));
+app.get('/shots', (req, res) => {
+    const brandId = BRANDS[req.query.brand] ? req.query.brand : DEFAULT_BRAND;
+    res.json(buildShotCatalog(brandId));
+});
+app.get('/brands', (_req, res) => res.json({ brands: listBrands(), defaultBrand: DEFAULT_BRAND }));
 app.get('/usage', (_req, res) => res.json(usageStats));
 app.post('/usage/reset', (_req, res) => {
     for (const key of Object.keys(usageStats.session)) {
@@ -749,6 +791,9 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
     const resolution        = ['draft', 'standard', 'high'].includes(req.body.resolution) ? req.body.resolution : 'standard';
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
     const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
+    const brandId           = BRANDS[req.body.brand] ? req.body.brand : DEFAULT_BRAND;
+    const overlayOpts       = parseOverlayOpts(req.body, brandId);
+    const shotCatalog       = buildShotCatalog(brandId);
 
     if (shotIds.length === 0) return res.status(400).json({ error: 'No shots selected.' });
 
@@ -776,8 +821,8 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
 
         // Generate anchor shot (no anchor reference for the anchor itself)
         console.log(`[Anchor] Generating ${anchorId} as consistency anchor via ${provider}...`);
-        const anchorShot = SHOT_CATALOG[anchorId];
-        const anchorResult = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution);
+        const anchorShot = shotCatalog[anchorId];
+        const anchorResult = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution, false, brandId, overlayOpts);
         anchorRef = { base64: anchorResult.base64, mimeType: 'image/png' };
         results.push({ id: anchorId, label: anchorShot.label, category: anchorShot.category, data: anchorResult.base64, provider: anchorResult.provider });
 
@@ -787,9 +832,9 @@ app.post('/generate', upload.array('images[]', 10), async (req, res) => {
         if (remaining.length > 0) {
             const refsWithAnchor = [...imageInputs, anchorRef];
             const parallel = await Promise.all(remaining.map(async (shotId) => {
-                const shot = SHOT_CATALOG[shotId];
+                const shot = shotCatalog[shotId];
                 if (!shot) return null;
-                const result = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing, multiPiece, resolution);
+                const result = await generateShot(shotId, refsWithAnchor, customInstruction, true, provider, autoMatchRing, multiPiece, resolution, false, brandId, overlayOpts);
                 return { id: shotId, label: shot.label, category: shot.category, data: result.base64, provider: result.provider };
             }));
             results.push(...parallel.filter(Boolean));
@@ -820,6 +865,8 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     const resolution        = ['draft', 'standard', 'high'].includes(req.body.resolution) ? req.body.resolution : 'standard';
     const autoMatchRing     = req.body.autoMatchRing === '1' || req.body.autoMatchRing === 1 || req.body.autoMatchRing === true;
     const multiPiece        = req.body.multiPiece === '1' || req.body.multiPiece === 1 || req.body.multiPiece === true;
+    const brandId           = BRANDS[req.body.brand] ? req.body.brand : DEFAULT_BRAND;
+    const overlayOpts       = parseOverlayOpts(req.body, brandId);
 
     const imageInputs = await Promise.all(req.files.map(async (f) => {
         const buf = await toJpeg(f.originalname || '', f.buffer);
@@ -827,10 +874,11 @@ app.post('/generate-angle', upload.array('images[]', 10), async (req, res) => {
     }));
 
     try {
-        const shot = SHOT_CATALOG[shotId];
+        const shotCatalog = buildShotCatalog(brandId);
+        const shot = shotCatalog[shotId];
         if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
-        const result = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution);
+        const result = await generateShot(shotId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution, false, brandId, overlayOpts);
         res.json({ success: true, imageData: result.base64, provider: result.provider, usage: usageStats });
     } catch (err) {
         console.error('[Retry Error]', err?.message || err);
@@ -884,6 +932,9 @@ app.get('/batch', async (req, res) => {
     const resume            = req.query.resume === '1';
     const autoMatchRing     = req.query.autoMatchRing === '1';
     const multiPiece        = req.query.multiPiece === '1';
+    const brandId           = BRANDS[req.query.brand] ? req.query.brand : DEFAULT_BRAND;
+    const overlayOpts       = parseOverlayOpts(req.query, brandId);
+    const shotCatalog       = buildShotCatalog(brandId);
     // Pre-run skip list: JSON array of subfolder names the user unchecked
     let skipFolders = [];
     try { skipFolders = JSON.parse(req.query.skipFolders || '[]'); } catch (e) { skipFolders = []; }
@@ -968,7 +1019,7 @@ app.get('/batch', async (req, res) => {
                 const allDone = shotIds.every(id => fs.existsSync(path.join(outDir, `${id}.png`)));
                 if (allDone) {
                     for (const shotId of shotIds) {
-                        const shot = SHOT_CATALOG[shotId];
+                        const shot = shotCatalog[shotId];
                         if (!shot) continue;
                         const outPath = path.join(outDir, `${shotId}.png`);
                         send({ type: 'angle_skipped', product: productName, angle: shotId, label: shot.label, savedTo: outPath });
@@ -985,7 +1036,7 @@ app.get('/batch', async (req, res) => {
 
             let anchorRef = null;
             let anchorGenerated = false;
-            const anchorShot = SHOT_CATALOG[anchorId];
+            const anchorShot = shotCatalog[anchorId];
             const anchorOutPath = path.join(outDir, `${anchorId}.png`);
 
             // Resume: try to reuse existing anchor
@@ -998,7 +1049,7 @@ app.get('/batch', async (req, res) => {
                 send({ type: 'angle_start', product: productName, angle: anchorId, label: `${anchorShot.label} (anchor)` });
                 console.log(`  [Shot] Generating anchor: ${anchorShot.label} (${anchorId}) via ${provider}...`);
                 try {
-                    const result = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution, !resume);
+                    const result = await generateShot(anchorId, imageInputs, customInstruction, false, provider, autoMatchRing, multiPiece, resolution, !resume, brandId, overlayOpts);
                     anchorRef = { base64: result.base64, mimeType: 'image/png' };
                     fs.writeFileSync(anchorOutPath, Buffer.from(result.base64, 'base64'));
                     anchorGenerated = true;
@@ -1033,7 +1084,7 @@ app.get('/batch', async (req, res) => {
             // Figure out which remaining shots need generating vs skipping
             const toGenerate = [];
             for (const shotId of remaining) {
-                const shot = SHOT_CATALOG[shotId];
+                const shot = shotCatalog[shotId];
                 if (!shot) continue;
                 const shotOutPath = path.join(outDir, `${shotId}.png`);
                 if (resume && fs.existsSync(shotOutPath)) {
@@ -1046,9 +1097,9 @@ app.get('/batch', async (req, res) => {
             }
 
             const parallelTasks = toGenerate.map(shotId => {
-                const shot = SHOT_CATALOG[shotId];
+                const shot = shotCatalog[shotId];
                 if (!shot) return Promise.resolve();
-                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing, multiPiece, resolution, !resume)
+                return generateShot(shotId, refsWithAnchor, customInstruction, hasAnchor, provider, autoMatchRing, multiPiece, resolution, !resume, brandId, overlayOpts)
                     .then(result => {
                         const p = path.join(outDir, `${shotId}.png`);
                         fs.writeFileSync(p, Buffer.from(result.base64, 'base64'));
@@ -1146,8 +1197,10 @@ app.post('/pick-folder', (req, res) => {
 
 // ── Prompt inspector (returns the exact prompt a shot would be sent) ────────
 app.post('/prompt-preview', (req, res) => {
-    const { shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece } = req.body || {};
-    if (!shotId || !SHOT_CATALOG[shotId]) {
+    const { shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece, brand } = req.body || {};
+    const brandId = BRANDS[brand] ? brand : DEFAULT_BRAND;
+    const brandShots = buildShotCatalog(brandId);
+    if (!shotId || !brandShots[shotId]) {
         return res.status(400).json({ error: 'Unknown shotId.' });
     }
     const prompt = buildShotPrompt(
@@ -1155,21 +1208,24 @@ app.post('/prompt-preview', (req, res) => {
         (customInstruction || '').trim() || null,
         !!hasAnchor,
         autoMatchRing === true || autoMatchRing === '1' || autoMatchRing === 1,
-        multiPiece === true || multiPiece === '1' || multiPiece === 1
+        multiPiece === true || multiPiece === '1' || multiPiece === 1,
+        brandId
     );
     res.json({ shotId, prompt });
 });
 
 // ── Batch retry single shot ─────────────────────────────────────────────────
 app.post('/retry-angle', upload.none(), async (req, res) => {
-    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr, multiPiece: rawMp, resolution: rawRes } = req.body;
+    const { productFolder, angleId, provider: retryProvider, feedback, autoMatchRing: rawAmr, multiPiece: rawMp, resolution: rawRes, brand: rawBrand } = req.body;
     const provider = (retryProvider || 'gemini').trim();
     const resolution = ['draft', 'standard', 'high'].includes(rawRes) ? rawRes : 'standard';
     const autoMatchRing = rawAmr === '1' || rawAmr === 1 || rawAmr === true;
     const multiPiece = rawMp === '1' || rawMp === 1 || rawMp === true;
+    const brandId = BRANDS[rawBrand] ? rawBrand : DEFAULT_BRAND;
+    const overlayOpts = parseOverlayOpts(req.body, brandId);
     if (!productFolder || !angleId) return res.status(400).json({ error: 'Missing productFolder or angleId.' });
 
-    const shot = SHOT_CATALOG[angleId];
+    const shot = buildShotCatalog(brandId)[angleId];
     if (!shot) return res.status(400).json({ error: 'Unknown shot type.' });
 
     const IMAGE_EXTS = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
@@ -1199,7 +1255,7 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
             return { base64: buf.toString('base64'), mimeType: 'image/jpeg' };
         }));
 
-        const result = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing, multiPiece, resolution);
+        const result = await generateShot(angleId, imageInputs, correction, false, provider, autoMatchRing, multiPiece, resolution, false, brandId, overlayOpts);
         const outPath = path.join(productFolder, '..', 'output', path.basename(productFolder), `${angleId}.png`);
         fs.mkdirSync(path.dirname(outPath), { recursive: true });
         fs.writeFileSync(outPath, Buffer.from(result.base64, 'base64'));
@@ -1210,10 +1266,50 @@ app.post('/retry-angle', upload.none(), async (req, res) => {
     }
 });
 
+// ── Retrofit overlay onto already-generated images ────────────────────────
+// Client uploads finished shots + optional weight text; server returns the
+// same images with the brand logo + weight composited on top. Lets users
+// tweak the weight caption (or apply the overlay to older batch runs) without
+// regenerating from scratch.
+app.post('/apply-overlay', upload.array('images', 50), async (req, res) => {
+    try {
+        const brandId    = BRANDS[req.body.brand] ? req.body.brand : DEFAULT_BRAND;
+        const brand      = resolveBrand(brandId);
+        if (!brand.overlay || !brand.overlay.supported) {
+            return res.status(400).json({ error: `Brand "${brand.label}" does not support overlays.` });
+        }
+        const weightText = (req.body.weightText || '').trim();
+        const files      = req.files || [];
+        if (files.length === 0) return res.status(400).json({ error: 'No images provided.' });
+
+        console.log(`[Overlay] brand=${brandId} applying to ${files.length} image(s) — weight: "${weightText || 'none'}"`);
+
+        const results = [];
+        for (const file of files) {
+            const b64 = file.buffer.toString('base64');
+            const overlaid = await applyOverlay(b64, weightText, brandId);
+            const meta = await sharp(Buffer.from(overlaid, 'base64')).metadata();
+            results.push({
+                name: file.originalname.replace(/\.[^.]+$/, '') + '_overlay.png',
+                data: overlaid,
+                width: meta.width,
+                height: meta.height,
+            });
+        }
+
+        res.json({ success: true, results });
+    } catch (err) {
+        console.error('[Overlay Error]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ── WhatsApp caption generation ────────────────────────────────────────────
 app.post('/generate-caption', upload.array('images[]', 10), async (req, res) => {
     const productName   = (req.body.productName || '').trim() || 'this piece';
     const extraContext   = (req.body.extraContext || '').trim();
+    const brandId       = BRANDS[req.body.brand] ? req.body.brand : DEFAULT_BRAND;
+    const brand         = resolveBrand(brandId);
 
     // Build image inputs from uploaded files (if any)
     let imageInputs = [];
@@ -1230,7 +1326,7 @@ app.post('/generate-caption', upload.array('images[]', 10), async (req, res) => 
         if (img.b64) imageInputs.push({ base64: img.b64, mimeType: 'image/png' });
     }
 
-    const captionPrompt = `You are the copywriter for House of Mina (houseofmina.store), a luxury South Asian jewelry brand based in Karachi. You write WhatsApp community posts to showcase new jewelry pieces.
+    const captionPrompt = `${brand.captionSystem}
 
 BRAND VOICE & STYLE:
 - Sophisticated yet accessible, warm, elegant, aspirational
@@ -1253,7 +1349,7 @@ WHATSAPP FORMATTING RULES:
 - Keep the whole caption under 500 characters
 
 SAMPLE FOR REFERENCE (match this energy and structure):
-"Meet your new obsession. *A certified yellow sapphire. Brilliant zircon accents. 925 sterling silver*. A combination this stunning doesn't come along often — and at *House of Mina*, it's entirely yours. We're celebrating our soft launch with special introductory pricing. These pieces won't wait forever. 📩 DM to order 🇵🇰 Nationwide Delivery"
+"Meet your new obsession. *A certified yellow sapphire. Brilliant zircon accents. 925 sterling silver*. A combination this stunning doesn't come along often — and at ${brand.captionBrandMention}, it's entirely yours. We're celebrating our soft launch with special introductory pricing. These pieces won't wait forever. 📩 DM to order 🇵🇰 Nationwide Delivery"
 
 CTA BLOCK (always end with this exact block):
 📩 DM to order
@@ -1310,8 +1406,11 @@ Now look at the jewelry image(s) provided and write ONE WhatsApp community capti
 
 // ── Download ZIP endpoint ───────────────────────────────────────────────────
 app.post('/download-zip', async (req, res) => {
-    const { images } = req.body;
+    const { images, brand: rawBrand } = req.body;
     if (!images || !Array.isArray(images) || images.length === 0) return res.status(400).json({ error: 'No images.' });
+
+    const brandId = BRANDS[rawBrand] ? rawBrand : DEFAULT_BRAND;
+    const brand = resolveBrand(brandId);
 
     const entries = images.map((img, i) => ({
         name: img.name || `image-${i + 1}.png`,
@@ -1320,7 +1419,7 @@ app.post('/download-zip', async (req, res) => {
 
     const zipBuf = buildZip(entries);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="house-of-mina-shots.zip"');
+    res.setHeader('Content-Disposition', `attachment; filename="${brand.zipFilename}"`);
     res.send(zipBuf);
 });
 
@@ -1418,20 +1517,32 @@ function buildZip(entries) {
 }
 
 // ── Universal shot generator (multi-provider) ───────────────────────────────
-async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false, multiPiece = false, resolution = 'standard', noCache = false) {
+async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = false, provider = 'gemini', autoMatchRing = false, multiPiece = false, resolution = 'standard', noCache = false, brandId = DEFAULT_BRAND, overlayOpts = null) {
     const startedAt = Date.now();
-    const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece);
+    const prompt   = buildShotPrompt(shotId, customInstruction, hasAnchor, autoMatchRing, multiPiece, brandId);
     const isEcom   = shotId.startsWith('ecom_');
-    const shotLabel = SHOT_CATALOG[shotId]?.label || shotId;
+    const shotLabel = buildShotCatalog(brandId)[shotId]?.label || shotId;
+
+    const maybeOverlay = async (b64) => {
+        if (!overlayOpts || !overlayOpts.enabled) return b64;
+        try {
+            return await applyOverlay(b64, overlayOpts.weightText || '', brandId);
+        } catch (err) {
+            console.warn(`[Overlay] failed for ${shotId}: ${err.message}`);
+            return b64;
+        }
+    };
 
     // 1. Cache hit? Skip the API call entirely (unless caller opts out).
+    // Note: cache stores the raw post-processed image; overlay is applied on
+    // the way out so toggling overlay doesn't require cache invalidation.
     const cacheKey = outputCacheKey(provider, shotId, prompt, imageInputs);
     if (!noCache) {
         const cached = outputCacheGet(cacheKey);
         if (cached) {
             console.log(`[Cache] HIT ${shotId} (${provider}) — $0`);
             audit({ shotId, provider, cache: true, durationMs: Date.now() - startedAt });
-            return { base64: cached, provider };
+            return { base64: await maybeOverlay(cached), provider };
         }
     } else {
         console.log(`[Cache] BYPASS ${shotId} (fresh batch)`);
@@ -1509,7 +1620,7 @@ async function generateShot(shotId, imageInputs, customInstruction, hasAnchor = 
         qcRetried,
         durationMs: Date.now() - startedAt,
     });
-    return { base64: raw, provider: usedProvider };
+    return { base64: await maybeOverlay(raw), provider: usedProvider };
 }
 
 async function generateWithGemini(prompt, imageInputs) {
@@ -1744,6 +1855,64 @@ async function callNanoBana2(parts, attempt = 0, imageSize = '2K') {
     }
 }
 
+// ── Overlay: weight text + brand logo ──────────────────────────────────────
+// Top-left weight text + top-right brand logo, scaled relative to a 3000px
+// reference canvas so it reads the same at every output size. Per-brand
+// logo path lives in the brand registry; if the logo file is missing we
+// just render the weight text.
+const OVERLAY_FONT_FAMILY = 'Futura LT';
+
+async function applyOverlay(base64, weightText, brandId = DEFAULT_BRAND) {
+    const brand = resolveBrand(brandId);
+    const overlayCfg = brand.overlay;
+    if (!overlayCfg || !overlayCfg.supported) return base64;
+
+    const buf = Buffer.from(base64, 'base64');
+    const meta = await sharp(buf).metadata();
+    const w = meta.width;
+    const h = meta.height;
+
+    const pad       = Math.round(w * (125 / 3000));
+    const fontSize  = Math.round(w * (143 / 3000));
+    const logoWidth = Math.round(w * (580 / 3000));
+
+    const composites = [];
+
+    if (weightText && weightText.trim()) {
+        const textLeftPad = Math.round(w * (120 / 3000));
+        const textSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${fontSize * 2}">
+            <text x="${textLeftPad}" y="${fontSize * 1.1}" font-family="${OVERLAY_FONT_FAMILY}" font-size="${fontSize}" font-weight="300" fill="white" letter-spacing="2">${weightText.trim()}</text>
+        </svg>`);
+        const textPad = Math.round(w * (100 / 3000));
+        composites.push({ input: textSvg, top: textPad, left: 0 });
+    }
+
+    const logoAbsPath = overlayCfg.logoPath && path.isAbsolute(overlayCfg.logoPath)
+        ? overlayCfg.logoPath
+        : path.join(__dirname, overlayCfg.logoPath || '');
+    if (logoAbsPath && fs.existsSync(logoAbsPath)) {
+        const logoBuf = await sharp(logoAbsPath)
+            .resize({ width: logoWidth, fit: 'inside' })
+            .png()
+            .toBuffer();
+        const logoMeta = await sharp(logoBuf).metadata();
+        composites.push({
+            input: logoBuf,
+            top: pad,
+            left: w - logoMeta.width - pad,
+        });
+    }
+
+    if (composites.length === 0) return base64;
+
+    console.log(`[Overlay] brand=${brand.id} ${weightText ? 'weight "' + weightText.trim() + '"' : 'no weight'} + logo on ${w}x${h}`);
+    const result = await sharp(buf)
+        .composite(composites)
+        .png({ compressionLevel: 6 })
+        .toBuffer();
+    return result.toString('base64');
+}
+
 // ── Image helpers ───────────────────────────────────────────────────────────
 async function makeSquareBase64(base64) {
     const buf = Buffer.from(base64, 'base64');
@@ -1902,7 +2071,10 @@ loadUsageStats();
 evictCache();
 setInterval(evictCache, 30 * 60 * 1000);
 
-const server = app.listen(PORT, () => console.log(`\nHouse of Mina Pipeline → http://localhost:${PORT}\n`));
+const server = app.listen(PORT, () => {
+    const brandNames = Object.values(BRANDS).map(b => b.label).join(' + ');
+    console.log(`\nUnified Pipeline (${brandNames}) → http://localhost:${PORT}\n`);
+});
 
 // Keep connections alive and prevent premature drops
 server.keepAliveTimeout = 120000;      // 2 minutes
