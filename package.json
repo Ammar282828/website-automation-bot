@@ -8,14 +8,11 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@google/genai": "^0.7.0",
+    "@google/genai": "^1.49.0",
     "dotenv": "^16.0.0",
     "express": "^4.19.0",
     "multer": "^1.4.5-lts.1",
     "openai": "^6.33.0",
     "sharp": "^0.34.5"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
   }
 }

@@ -188,6 +188,9 @@ async function generateModelShot(base64Image, mimeType, customInstruction) {
         }],
         config: {
             responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+                imageSize: '4K',
+            },
         },
     });
 
